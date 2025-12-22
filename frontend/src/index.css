@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+/* İsteğe bağlı: Tüm uygulama için varsayılan font ve renk */
+body {
+  background-color: #36393f;
+  color: white;
+}
