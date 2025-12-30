@@ -75,7 +75,12 @@ const ServerSettingsModal = ({ server, currentUser, onClose, onUpdateServer, onD
         formData.append('icon', croppedBlob, 'icon.jpg');
 
         try {
-            const API_URL = `http://${window.location.hostname}:5000`;
+            // Eğer Localhost ise 5000 portunu kullan, Canlıdaysa (HTTPS) direkt domaini kullan
+            const isLocal = window.location.hostname === 'localhost';
+            
+            const API_URL = isLocal 
+                ? 'http://localhost:5000'       // Geliştirme ortamı
+                : 'https://konvectra.com';
             // DİKKAT: Bu rota Backend'de olmalı. (Aşağıda backend kodunu da vereceğim)
             const res = await fetch(`${API_URL}/api/servers/${server._id}/icon`, {
                 method: 'POST',
