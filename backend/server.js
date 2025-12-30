@@ -35,6 +35,16 @@ app.use(cors());
 
 app.use('/avatars', express.static(path.join(__dirname, 'public/avatars')));
 
+app.use((req, res, next) => {
+    // Sadece avatar isteği geldiğinde log alalım
+    if (req.url.includes('/avatar') && req.method === 'POST') {
+        console.log('🔥 --- AVATAR İSTEĞİ YAKALANDI --- 🔥');
+        console.log('Gelen Content-Type:', req.headers['content-type']);
+        console.log('---------------------------------------');
+    }
+    next();
+});
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: true, methods: ["GET", "POST"], credentials: true }
@@ -881,8 +891,13 @@ app.post('/api/users/:userId/avatar', upload.single('avatar'), async (req, res) 
     const cloudUrl = await uploadToB2(req.file, 'users');
 
     // 3. Eğer kullanıcının eski bir avatarı varsa ve bu bir Backblaze url'iyse SİL
-    if (currentUser.avatar) {
-        await deleteFromB2(currentUser.avatar);
+    if (currentUser.avatar && !currentUser.avatar.includes('/avatars/')) {
+        try {
+            await deleteFromB2(currentUser.avatar);
+        } catch (deleteErr) {
+            console.error("Eski avatar silinemedi (önemli değil, devam et):", deleteErr);
+            // Silme hatası olsa bile işlemi durdurma, yeni resmi kaydetmeye devam et
+        }
     }
 
     // 4. Veritabanını güncelle
