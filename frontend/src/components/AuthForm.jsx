@@ -1,19 +1,22 @@
 import { useState } from 'react';
-import { FaDiscord } from 'react-icons/fa';
 
 const AuthForm = ({ onLogin, onRegister, isLoading }) => {
   const [isRegister, setIsRegister] = useState(false);
-  const [formData, setFormData] = useState({ username: '', password: '' });
+  const [formData, setFormData] = useState({ username: '', password: '', nickname: '' });
 
   // Input değişimlerini tek yerden yönet
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (isRegister) {
-      onRegister(formData.username, formData.password);
+      const success = await onRegister(formData.username, formData.password, formData.nickname);
+      if (success) {
+        setIsRegister(false); // Login ekranına geç
+        setFormData({ username: '', password: '', nickname: '' }); // Formu temizle
+      }
     } else {
       onLogin(formData.username, formData.password);
     }
@@ -21,9 +24,11 @@ const AuthForm = ({ onLogin, onRegister, isLoading }) => {
 
   return (
     // Arka Plan (Discord Deseni)
-    <div className="flex items-center justify-center min-h-screen bg-[#121214] relative overflow-hidden">
-
+    <div className="flex flex-col items-center justify-center min-h-screen tech-bg relative overflow-hidden">
       {/* Ana Kart */}
+      {/* DEĞİŞİKLİK 3: 'animation-delay-200' (veya benzeri bir sınıf) ile formun gelişini geciktirebiliriz. 
+          Eğer Tailwind config'inde yoksa standart 'animate-fade-in-up' da kalabilir, çok sorun değil.
+          Ben şimdilik standart bırakıyorum ama z-index'i artırdım. */}
       <div className="bg-[#1A1A1E] p-8 rounded-lg w-full max-w-[480px] shadow-2xl flex flex-col gap-6 relative z-10 animate-fade-in-up">
         
         {/* Başlık Kısmı */}
@@ -53,6 +58,22 @@ const AuthForm = ({ onLogin, onRegister, isLoading }) => {
               required 
             />
           </div>
+
+          {/* 👇 YENİ INPUT: SADECE KAYITTA GÖZÜKÜR */}
+          {isRegister && (
+            <div className="flex flex-col gap-1.5 animate-fade-in">
+                <label className="text-xs font-bold text-[#B5BAC1] uppercase tracking-wide">
+                    Takma Ad <span className="text-red-500">*</span>
+                </label>
+                <input 
+                    name="nickname"
+                    className="bg-[#121214] p-2.5 rounded text-white outline-none focus:ring-2 focus:ring-[#00A8FC] transition-all font-medium h-10" 
+                    value={formData.nickname} 
+                    onChange={handleChange} 
+                    required 
+                />
+            </div>
+          )}
 
           {/* Şifre */}
           <div className="flex flex-col gap-1.5">

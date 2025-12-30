@@ -42,7 +42,7 @@ const ChannelList = ({
   };
 
   return (
-    <div className="w-60 bg-[#121214] flex flex-col flex-1 relative">
+    <div className="w-[100%] bg-[#121214] flex flex-col flex-1 relative">
       
       
       

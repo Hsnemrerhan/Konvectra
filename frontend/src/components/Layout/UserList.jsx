@@ -156,7 +156,7 @@ const UserList = ({ users, roles = [], ownerId, type = "server" }) => {
   };
 
   return (
-    <div className="w-60 bg-[#121214] hidden lg:flex flex-col p-3 overflow-y-auto flex-shrink-0 border-l border-[#1f2023] custom-scrollbar">
+    <div className="w-[20%] bg-[#121214] hidden lg:flex flex-col p-3 overflow-y-auto flex-shrink-0 border-l border-[#1f2023] custom-scrollbar">
       
       {/* 1. ÇEVRİMİÇİ GRUPLARI */}
       {orderedGroupKeys.map(key => {

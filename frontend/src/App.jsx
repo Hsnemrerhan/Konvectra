@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import io from 'socket.io-client';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { FaHashtag, FaVolumeUp, FaPlus, FaCog, FaAngleDown, FaMusic, FaMicrophoneSlash } from 'react-icons/fa';
 
 // --- BİLEŞENLER ---
@@ -26,8 +26,19 @@ import VoiceConnectionPanel from './components/Voice/VoiceConnectionPanel';
 // 👇 YENİ: LiveKit Bileşeni (Eski VoiceRoom yerine)
 import VoiceChannel from './components/Voice/VoiceChannel';
 
-const API_URL = `http://${window.location.hostname}:5000`;
-const socket = io(API_URL, { transports: ["websocket"], reconnectionAttempts: 5 });
+// Localhost mu yoksa Canlı Sunucu mu olduğunu anla
+const isProduction = window.location.hostname !== 'localhost';
+
+// Eğer canlıdaysak direkt domaini kullan (Port YOK, https VAR)
+// Eğer localdeysek port 5000 kullan
+const API_URL = isProduction
+    ? "https://konvectra.com"
+    : "http://localhost:5000";
+
+const socket = io(API_URL, {
+    transports: ["websocket"],
+    reconnectionAttempts: 5
+});
 
 function App() {
   // --- STATE YÖNETİMİ ---
@@ -327,6 +338,20 @@ useEffect(() => {
     }
 }, [myServers]); // 👈 myServers değiştiğinde (yüklendiğinde) çalışır
 
+useEffect(() => {
+   if(activeServer != null){
+    document.title = `Konvectra | ${activeServer.name}`;
+   }
+   else document.title = "Konvectra";
+}, [activeServer]);
+
+useEffect(() => {
+    if (!token && location.pathname !== '/') {
+      // "Geçmişe bir şey eklemeden sadece şu anki URL'i '/' olarak değiştir"
+      window.history.replaceState(null, '', '/');
+    }
+  }, [token, location.pathname]);
+
   const fetchUserData = async () => {
     try {
       const userId = currentUser.id || currentUser._id;
@@ -382,26 +407,6 @@ useEffect(() => {
 
   // --- HANDLERS ---
 
-  const handleAuth = async (username, password, endpoint) => {
-    try {
-      const res = await fetch(`${API_URL}${endpoint}`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ username, password })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
-      
-      if (endpoint === '/api/register') {
-        alert("Kayıt başarılı! Giriş yapabilirsiniz.");
-      } else {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        setToken(data.token);
-        setCurrentUser(data.user);
-      }
-    } catch (err) { alert(err.message); }
-  };
-
   // 👇 GİRİŞ YAPMA FONKSİYONU
 const handleLogin = async (username, password) => {
     setIsAuthLoading(true); // Yükleniyor başlat
@@ -454,13 +459,13 @@ const handleLogin = async (username, password) => {
 };
 
 // 👇 KAYIT OLMA FONKSİYONU
-const handleRegister = async (username, password) => {
+const handleRegister = async (username, password, nickname) => {
     setIsAuthLoading(true);
     try {
         const res = await fetch(`${API_URL}/api/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password }),
+            body: JSON.stringify({ username, password, nickname }),
         });
         const data = await res.json();
 
@@ -476,7 +481,7 @@ const handleRegister = async (username, password) => {
                     </span>
                 )
             });
-            // İstersen burada otomatik olarak login ekranına geçiş yaptırabilirsin (UI state ile)
+            return true; // ✅ BAŞARILI OLDUĞUNU DÖNDÜR
         } else {
             // ❌ HATA (Kullanıcı adı dolu vb.)
             setFeedback({
@@ -500,7 +505,7 @@ const handleRegister = async (username, password) => {
 
   const handleLogout = () => {
       localStorage.clear();
-      window.location.reload();
+      window.location.href = '/';
   };
 
   const handleSendMessage = (content) => {
@@ -819,9 +824,9 @@ const voicePanelContent = activeVoiceChannel ? (
         {activeServer ? (
             // === SERVER GÖRÜNÜMÜ ===
             <>
-                <div className="w-60 bg-[#121214] flex flex-col flex-shrink-0 relative h-full">
+                <div className="w-[18%] min-w-[192px] bg-[#121214] flex flex-col flex-shrink-0 relative h-full">
                     {/* 1. SUNUCU BAŞLIĞI */}
-                    <div className="h-12 flex items-center justify-between px-4 font-bold shadow-sm text-white hover:bg-[#35373c] cursor-pointer transition border-b border-[#1f2023] group flex-shrink-0">
+                    <div className="h-12 flex items-center justify-between px-4 font-bold shadow-sm text-white cursor-pointer transition border-b border-[#1f2023] group flex-shrink-0">
                         <span className="truncate">{activeServer.name}</span>
                         <FaCog 
                             className="text-gray-400 hover:text-white transition cursor-pointer" 

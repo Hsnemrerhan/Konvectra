@@ -16,7 +16,7 @@ const HomeSidebar = ({
   voicePanelContent
 }) => {
   return (
-    <div className="w-60 bg-[#121214] flex flex-col flex-shrink-0">
+    <div className="w-[18%] min-w-[192px] bg-[#121214] flex flex-col flex-shrink-0">
       
       {/* Başlık */}
       <div className="h-12 flex items-center px-4 font-bold shadow-sm text-white border-b border-[#202225]">

@@ -2,6 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
+*{
+  transition: all ease .3s;
+}
 
 /* İsteğe bağlı: Tüm uygulama için varsayılan font ve renk */
 body {
@@ -32,4 +35,22 @@ body {
 
 .animate-bounce-short {
   animation: bounceShort 0.5s ease-in-out;
+}
+
+
+/* index.css */
+
+/* --- Tekno Arka Plan Deseni --- */
+.tech-bg {
+  background-color: #121214; /* Mevcut koyu renk */
+  /* İnce bir ızgara deseni */
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 30px 30px; /* Karelerin boyutu */
+  /* Ortadan dışa doğru hafif bir ışık (vinyet) efekti */
+  background: radial-gradient(circle at center, #1a1a1e 0%, #000000 100%),
+              linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+              linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-blend-mode: normal, overlay, overlay;
 }

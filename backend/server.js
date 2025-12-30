@@ -134,7 +134,7 @@ const UserSchema = new mongoose.Schema({
       timestamp: { type: Date, default: Date.now }
   }],
   lastRead: { type: Map, of: String, default: {} }
-});
+}, { timestamps: true });
 UserSchema.index({ username: 1, friendCode: 1 }, { unique: true });
 const User = mongoose.model('User', UserSchema);
 
@@ -271,13 +271,13 @@ async function deleteFromB2(fileUrl) {
 
 app.post('/api/register', async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const { username, password, nickname } = req.body;
+
     const existingUser = await User.findOne({ username });
     if (existingUser) return res.status(400).json({ message: 'Bu kullanıcı adı dolu!' });
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const friendCode = generateFriendCode();
-    const nickname = username;
 
     // 👇 YENİ KISIM: İSİM LİSTESİNDEN SEÇİM
     const avatarNames = ['nova', 'silas', 'arlo', 'maya', 'felix', 'jasper', 'luna'];
@@ -286,9 +286,7 @@ app.post('/api/register', async (req, res) => {
     const randomName = avatarNames[Math.floor(Math.random() * avatarNames.length)];
 
     // URL'i oluştur
-    const protocol = req.protocol;
-    const host = req.get('host');
-    const avatarUrl = `${protocol}://${host}/avatars/${randomName}.png`;
+    const avatarUrl = `https://konvectra.com/avatars/${randomName}.png`;
 
     const newUser = new User({ username, nickname, friendCode, password: hashedPassword, avatar: avatarUrl });
     await newUser.save();
@@ -330,8 +328,6 @@ app.post('/api/login', async (req, res) => {
 // 🔥 LIVEKIT TOKEN API'Sİ (GÜNCELLENMİŞ) 🔥
 // ==========================================
 app.post('/api/livekit/token', async (req, res) => {
-    console.log(`ApiKey Kontrol: [${process.env.LIVEKIT_API_KEY}]`);
-    console.log(`Secret Kontrol: [${process.env.LIVEKIT_API_SECRET}]`);
     try {
         const { roomName, userId, username, avatar } = req.body;
 

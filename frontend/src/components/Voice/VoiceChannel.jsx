@@ -11,9 +11,13 @@ import '@livekit/components-styles'; // Varsayılan stiller
 import { Track } from 'livekit-client';
 
 // Backend API adresiniz
-const API_URL = 'http://192.168.0.34:5000'; 
+const isProduction = window.location.hostname !== 'localhost';
+const API_URL = isProduction
+    ? "https://konvectra.com"  // Canlıdaysak Domain (Portsuz)
+    : "http://localhost:5000"; // Localdeysek Port 5000
+
 // Docker'da çalışan LiveKit Sunucu adresi (Frontend'den erişilen)
-const LIVEKIT_URL = 'ws://192.168.0.34:7880';
+const LIVEKIT_URL = 'wss://konvectra-tpi8ize0.livekit.cloud';
 
 export default function VoiceChannel({ 
   channelId, 
