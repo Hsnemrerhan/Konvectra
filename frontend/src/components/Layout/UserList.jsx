@@ -123,14 +123,14 @@ const UserList = ({ users, roles = [], ownerId, type = "server" }) => {
             ${isOffline ? 'opacity-40 hover:opacity-100' : 'opacity-100'}`} 
         >
           {/* Avatar */}
-          <div className="w-8 h-8 rounded-full bg-gray-600 relative flex-shrink-0">
+          <div className="w-[45px] h-[45px] rounded-full bg-gray-600 relative flex-shrink-0">
             <AnimatedAvatar 
                 src={user.avatar} 
                 alt={user.nickname}
                 className={`w-full h-full rounded-full object-cover ${isOffline ? 'grayscale' : ''}`} // className'i buraya veriyoruz
             />
             {/* Durum Noktası */}
-            <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#121214] 
+            <div className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-[#121214] 
                 ${getStatusColor(user.status || 'offline')}`}>
             </div>
           </div>
@@ -138,7 +138,7 @@ const UserList = ({ users, roles = [], ownerId, type = "server" }) => {
           {/* İsim ve Durum */}
           <div className="overflow-hidden">
             <div 
-                className="font-bold text-sm truncate" 
+                className="font-bold text-[18px] truncate" 
                 style={{ color: nameColor }} 
             >
                 <AnimatedNickname 
@@ -146,7 +146,7 @@ const UserList = ({ users, roles = [], ownerId, type = "server" }) => {
                 />
             </div>
             
-            <div className="text-xs text-gray-400 truncate">
+            <div className="text-[13px] text-gray-400 truncate">
                 {user.status === 'online' ? 'Çevrimiçi' : user.status === 'dnd' ? 'Rahatsız Etmeyin' : user.status === 'idle' ? 'Boşta' : user.status === 'offline' ? 'Çevrimdışı' : ''
                 }
             </div>

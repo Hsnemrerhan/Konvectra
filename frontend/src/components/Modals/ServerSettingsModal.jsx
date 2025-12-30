@@ -1,14 +1,16 @@
 import { useState, useRef } from 'react';
 import { FaTimes, FaTrash, FaCrown, FaPlus, FaUpload } from 'react-icons/fa';
 import ImageCropper from './ImageCropper'; // Kırpma bileşeni
+import { useNavigate } from 'react-router-dom';
 
-const ServerSettingsModal = ({ server, currentUser, onClose, onUpdateServer, onKickMember, onAssignRole, onCreateRole, onDeleteRole }) => {
+const ServerSettingsModal = ({ server, currentUser, onClose, onUpdateServer, onDeleteServer, onKickMember, onAssignRole, onCreateRole, onDeleteRole }) => {
   const [activeTab, setActiveTab] = useState('overview'); 
   
   const isOwner = currentUser.id === server.owner;
 
   // Form States
   const [serverName, setServerName] = useState(server.name);
+  const navigate = useNavigate();
   
   // --- RESİM YÜKLEME STATE'LERİ ---
   const [previewIcon, setPreviewIcon] = useState(server.icon || ''); // Ekranda görünen
@@ -21,6 +23,12 @@ const ServerSettingsModal = ({ server, currentUser, onClose, onUpdateServer, onK
   // Role States
   const [newRoleName, setNewRoleName] = useState('');
   const [newRoleColor, setNewRoleColor] = useState('#99aab5');
+
+  // --- SİLME MODALI STATE'LERİ ---
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false); // Modalı aç/kapat
+  const [deleteInput, setDeleteInput] = useState(''); // Kullanıcının yazdığı isim
+  const [deleteError, setDeleteError] = useState(''); // Hata mesajı (İsim yanlışsa)
+  const [isDeleting, setIsDeleting] = useState(false); // Yükleniyor durumu
 
   // --- DOSYA SEÇME VE KIRPMA İŞLEMLERİ ---
   const handleFileSelect = (e) => {
@@ -93,6 +101,51 @@ const ServerSettingsModal = ({ server, currentUser, onClose, onUpdateServer, onK
     if (!newRoleName.trim()) return;
     onCreateRole(server._id, newRoleName, newRoleColor);
     setNewRoleName('');
+  };
+
+ // 1. "Sunucuyu Sil" butonuna basınca çalışır (Sadece Modalı Açar)
+  const openDeleteModal = () => {
+    setDeleteInput('');
+    setDeleteError('');
+    setShowDeleteConfirm(true);
+  };
+
+  // 2. Modalın içindeki "Sil" butonuna basınca çalışır (API İsteği Atar)
+  const confirmDelete = async () => {
+    // İsim doğrulama kontrolü
+    if (deleteInput !== server.name) {
+        setDeleteError("Sunucu adı eşleşmiyor.");
+        return;
+    }
+
+    setIsDeleting(true); // Yükleniyor...
+
+    try {
+        const API_URL = `http://${window.location.hostname}:5000`;
+        const token = localStorage.getItem('token');
+
+        const res = await fetch(`${API_URL}/api/servers/${server._id}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.message || "Sunucu silinemedi.");
+        }
+
+        // Başarılı (Alert vermeden direkt işlem yapıyoruz)
+        setShowDeleteConfirm(false);
+        onClose(); // Ayarlar modalını kapat
+        if (onDeleteServer) onDeleteServer(server._id); // Listeden sil
+        navigate('/servers/@me'); // Ana sayfaya at
+
+    } catch (error) {
+        setDeleteError(error.message); // Hatayı modal içinde göster
+        setIsDeleting(false);
+    }
   };
 
   return (
@@ -178,6 +231,7 @@ const ServerSettingsModal = ({ server, currentUser, onClose, onUpdateServer, onK
                                     Kaldır
                                 </button>
                             )}
+                            
                         </div>
 
                         {/* 2. FORM */}
@@ -205,6 +259,26 @@ const ServerSettingsModal = ({ server, currentUser, onClose, onUpdateServer, onK
                         <div className="mt-8 p-4 rounded flex justify-between items-center">
                             <span className="text-gray-400 text-sm">Değişiklikleri kaydetmeyi unutma!</span>
                             <button onClick={handleSaveOverview} className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded font-medium transition shadow-lg">Değişiklikleri Kaydet</button>
+                        </div>
+                    )}
+                    {isOwner && (
+                        <div className="mt-12 pt-6 border-t border-gray-700">
+                            <h3 className="text-gray-400 font-bold text-xs uppercase mb-4">Tehlikeli Bölge</h3>
+                            <div className="border border-red-500/50 rounded p-4 flex items-center justify-between bg-red-500/5 hover:bg-red-500/10 transition">
+                                <div>
+                                    <div className="text-white font-medium">Sunucuyu Sil</div>
+                                    <div className="text-gray-400 text-xs mt-1">
+                                        Sunucuyu sildiğinde tüm kanallar, mesajlar ve roller kalıcı olarak silinir.
+                                        Bu işlem geri alınamaz.
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={openDeleteModal}
+                                    className="bg-transparent border border-red-500 text-red-500 hover:bg-red-600 hover:text-white px-4 py-2 rounded font-medium transition text-sm whitespace-nowrap"
+                                >
+                                    Sunucuyu Sil
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -305,6 +379,63 @@ const ServerSettingsModal = ({ server, currentUser, onClose, onUpdateServer, onK
                     onCropComplete={handleCropComplete}
                     onCancel={handleCropCancel}
                 />
+            </div>
+        </div>
+      )}
+
+      {/* --- SİLME ONAY MODALI (CUSTOM) --- */}
+      {showDeleteConfirm && (
+        <div className="absolute inset-0 z-[70] bg-black/80 flex items-center justify-center animate-fade-in p-4">
+            <div className="bg-[#1A1A1E] w-full max-w-md rounded shadow-2xl overflow-hidden flex flex-col">
+                
+                {/* BAŞLIK */}
+                <div className="p-4 px-6">
+                    <h3 className="text-xl font-bold text-center text-white mb-2">{server.name} silinsin mi?</h3>
+                    <div className="bg-red-500/10 border border-red-500/50 rounded p-3 text-sm text-gray-200">
+                        <span className="font-bold text-red-500">Dikkat!</span> Bu işlem sunucuyu, kanalları ve mesajları <span className="font-bold text-red-500">kalıcı olarak</span> siler. Bu işlem geri alınamaz.
+                    </div>
+                </div>
+
+                {/* FORM */}
+                <div className="px-6 py-2 space-y-2">
+                    <label className="text-[15px] text-gray-200">
+                        Onaylamak için lütfen <span className="select-all font-bold text-red-500">{server.name}</span> yaz
+                    </label>
+                    <input 
+                        value={deleteInput}
+                        onChange={(e) => {
+                            setDeleteInput(e.target.value);
+                            setDeleteError(''); // Yazarken hatayı sil
+                        }}
+                        onKeyDown={(e) => e.key === 'Enter' && confirmDelete()}
+                        className="w-full bg-[#121214] p-2.5 rounded text-white outline-none border border-transparent focus:border-red-500 transition"
+                        autoFocus
+                    />
+                    {deleteError && (
+                        <span className="text-xs text-red-400 font-medium block">{deleteError}</span>
+                    )}
+                </div>
+
+                {/* FOOTER (BUTONLAR) */}
+                <div className="bg-[#121214] p-4 flex justify-end gap-3 mt-4">
+                    <button 
+                        onClick={() => setShowDeleteConfirm(false)}
+                        className="px-4 py-2 text-white hover:underline text-sm font-medium"
+                        disabled={isDeleting}
+                    >
+                        İptal
+                    </button>
+                    <button 
+                        onClick={confirmDelete}
+                        disabled={isDeleting}
+                        className={`px-6 py-2 rounded text-white font-medium text-sm transition flex items-center gap-2 ${
+                            isDeleting ? 'bg-red-800 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600 shadow-md'
+                        }`}
+                    >
+                        {isDeleting ? 'Siliniyor...' : 'Sunucuyu Sil'}
+                    </button>
+                </div>
+
             </div>
         </div>
       )}

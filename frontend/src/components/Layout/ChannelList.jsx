@@ -167,18 +167,18 @@ const ChannelList = ({
                                     const isDeafened = p.isDeafened || false;
 
                                     return (
-                                        <div key={user._id || idx} className="flex items-center justify-between px-2 py-1 rounded hover:bg-[#1A1A1E] cursor-pointer group/user">
+                                        <div key={user._id || idx} className="flex items-center justify-between px-2 py-1 rounded cursor-pointer group/user">
                                             
                                             {/* Sol Kısım: Avatar ve İsim */}
                                             <div className="flex items-center gap-2 p-0.5 overflow-hidden">
-                                                <div className={`relative w-7 h-7 rounded-full ${p.isSpeaking ? 'ring-2 ring-green-500' : ''}`}>
+                                                <div className={`relative w-9 h-9 rounded-full ${p.isSpeaking ? 'ring-2 ring-green-500' : ''}`}>
                                                     <img 
                                                         src={user.avatar || "https://i.pravatar.cc/150"} 
                                                         className={`w-full h-full rounded-full object-cover ${isDeafened ? 'opacity-50' : 'opacity-100'}`}
                                                         alt={user.username}
                                                     />
                                                 </div>
-                                                <span className={`text-m truncate ${isDeafened ? 'text-gray-400' : 'text-gray-200'}`}>
+                                                <span className={`text-[17px] truncate ${isDeafened ? 'text-gray-400' : 'text-gray-200'}`}>
                                                     {user.nickname || user.username}
                                                 </span>
                                             </div>
@@ -188,13 +188,13 @@ const ChannelList = ({
                                                 {/* Mikrofon Kapalı İkonu */}
                                                 {isDeafened ? (
                                                     <>
-                                                        <FaMicrophoneSlash size={14} className="text-red-500" title="Susturuldu (Otomatik)" />
-                                                        <TbHeadphonesOff size={15} className="text-red-500" title="Sağırlaştırıldı" />
+                                                        <FaMicrophoneSlash size={17} className="text-red-500" title="Susturuldu (Otomatik)" />
+                                                        <TbHeadphonesOff size={18} className="text-red-500" title="Sağırlaştırıldı" />
                                                     </>
                                                 ) : (
                                                     /* Durum 2: SADECE SUSTURULMUŞ (MUTE) */
                                                     isMuted && (
-                                                        <FaMicrophoneSlash size={14} className="text-red-500" title="Susturuldu" />
+                                                        <FaMicrophoneSlash size={17} className="text-red-500" title="Susturuldu" />
                                                     )
                                                 )}
                                             </div>

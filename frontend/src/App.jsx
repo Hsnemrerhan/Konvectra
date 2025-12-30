@@ -610,6 +610,13 @@ const handleJoinVoice = (channel) => {
       if(res.ok) fetchUserData();
   };
 
+  const handleServerDeleted = (deletedServerId) => {
+    // Listeden çıkar
+    setMyServers(prev => prev.filter(s => s._id !== deletedServerId));
+    // Aktif sunucuyu sıfırla
+    setActiveServer(null);
+};
+
   const handleAssignRole = async (serverId, memberId, roleId) => {
       const res = await fetch(`${API_URL}/api/servers/${serverId}/members/${memberId}/roles`, {
           method: 'PUT', headers: {'Content-Type': 'application/json'},
@@ -966,6 +973,7 @@ const voicePanelContent = activeVoiceChannel ? (
               currentUser={currentUser}
               onClose={() => setShowServerSettings(false)}
               onUpdateServer={handleUpdateServer}
+              onDeleteServer={handleServerDeleted}
               onCreateRole={handleCreateRole}
               onKickMember={handleKickMember}
               onAssignRole={handleAssignRole}

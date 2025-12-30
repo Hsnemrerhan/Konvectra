@@ -14,7 +14,9 @@ const multer = require('multer');
 const ytdl = require('@distube/ytdl-core'); // YouTube indirici
 const ffmpeg = require('fluent-ffmpeg'); // Ses işleyici
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+const authMiddleware = require('./middleware/auth');
 const { AccessToken, WebhookReceiver } = require('livekit-server-sdk');
+
 require('dotenv').config();
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -623,6 +625,57 @@ app.post('/api/servers/create', async (req, res) => {
 
     res.json(populatedServer);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- SUNUCU SİLME (Cascade Delete) ---
+app.delete('/api/servers/:serverId', authMiddleware, async (req, res) => {
+    try {
+        const { serverId } = req.params;
+        const userId = req.user.id || req.user.userId || req.user._id; // Auth middleware'den gelen ID
+
+        // 1. Sunucuyu bul (Server değil, ServerModel kullanıyoruz)
+        const server = await ServerModel.findById(serverId); // 👈 DÜZELTİLDİ
+        if (!server) return res.status(404).json({ message: "Sunucu bulunamadı." });
+
+        // 2. Sadece SAHİBİ silebilir
+        if (server.owner.toString() !== userId) {
+            return res.status(403).json({ message: "Bu sunucuyu silme yetkiniz yok." });
+        }
+
+        // 3. Backblaze B2'den İkonu Sil (Varsa)
+        if (server.icon && !server.icon.includes('/avatars/')) {
+            try {
+                // deleteFromB2 fonksiyonunun server.js'de tanımlı olduğunu varsayıyoruz
+                if (typeof deleteFromB2 === 'function') {
+                     await deleteFromB2(server.icon);
+                }
+            } catch (err) {
+                console.error("Sunucu ikonu silinirken hata (önemsiz):", err);
+            }
+        }
+
+        // 4. Zincirleme Silme: Kanallar ve Mesajlar
+        const channels = await Channel.find({ serverId: serverId }); // Channel modeli doğru
+        const channelIds = channels.map(c => c._id);
+
+        // Mesajları sil
+        await Message.deleteMany({ channelId: { $in: channelIds } }); // Message modeli doğru
+        
+        // Kanalları sil
+        await Channel.deleteMany({ serverId: serverId });
+
+        // 5. Son olarak sunucuyu sil
+        await ServerModel.findByIdAndDelete(serverId); // 👈 DÜZELTİLDİ
+
+        // Socket ile herkese haber ver
+        io.emit('server_deleted', { serverId });
+
+        res.json({ message: "Sunucu ve bağlı tüm veriler başarıyla silindi." });
+
+    } catch (err) {
+        console.error("Sunucu silme hatası:", err);
+        res.status(500).json({ message: "Sunucu silinirken bir hata oluştu." });
+    }
 });
 
 // --- SUNUCU YÖNETİMİ API'LERİ ---
