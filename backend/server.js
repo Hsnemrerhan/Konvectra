@@ -14,18 +14,33 @@ const multer = require('multer');
 const ytdl = require('@distube/ytdl-core'); // YouTube indirici
 const ffmpeg = require('fluent-ffmpeg'); // Ses işleyici
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+const { AccessToken, WebhookReceiver } = require('livekit-server-sdk');
+require('dotenv').config();
 ffmpeg.setFfmpegPath(ffmpegPath);
 
+// --- AYARLAR ---
+const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY;
+const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET;
+const webhookReceiver = new WebhookReceiver(LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
+
 const app = express();
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf.toString(); // Gelen ham veriyi sakla
+  },
+  type: '*/*'
+}));
+app.use(express.urlencoded({ extended: true }));
 app.use(cors());
+
+app.use('/avatars', express.static(path.join(__dirname, 'public/avatars')));
 
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: true, methods: ["GET", "POST"], credentials: true }
 });
-
-const JWT_SECRET = 'cok_gizli_siber_guvenlik_anahtari'; 
+let globalVoiceState = {};
+const JWT_SECRET = process.env.JWT_SECRET; 
 
 // --- BACKBLAZE B2 AYARLARI ---
 const s3 = new S3Client({
@@ -34,12 +49,12 @@ const s3 = new S3Client({
   endpoint: "https://s3.eu-central-003.backblazeb2.com", 
   region: "eu-central-003", 
   credentials: {
-    accessKeyId: "0030a2ae0c23f5e0000000001", // Backblaze Key ID
-    secretAccessKey: "K003+ftw/yka9r0Cg1/NgGcTK4QlQ8E" // Backblaze Application Key
+    accessKeyId: process.env.BACKBLAZE_KEY_ID, // Backblaze Key ID
+    secretAccessKey: process.env.BACKBLAZE_APP_KEY // Backblaze Application Key
   }
 });
 
-const BUCKET_NAME = "voice-chat"; // Oluşturduğun Bucket adı
+const BUCKET_NAME = process.env.BACKBLAZE_BUCKET; // Oluşturduğun Bucket adı
 
 // --- MULTER AYARLARI (GEÇİCİ DEPOLAMA) ---
 
@@ -74,14 +89,14 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({ storage: storage, fileFilter: fileFilter, limits: { fileSize: 5 * 1024 * 1024 } }); // Max 5MB
 
 // --- MONGODB BAĞLANTISI ---
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/discord_clone';
+const MONGO_URI = process.env.MONGO_URI;
 mongoose.connect(MONGO_URI)
   .then(() => console.log('✅ MongoDB Bağlantısı Başarılı'))
   .catch(err => console.error('❌ MongoDB Hatası:', err));
 
 // --- REDIS BAĞLANTISI ---
 const redisClient = createClient({
-    url: 'redis://redis:6379'
+    url: process.env.REDIS_URL
 });
 
 redisClient.on('error', (err) => console.log('Redis Client Error', err));
@@ -107,7 +122,7 @@ const UserSchema = new mongoose.Schema({
   nickname: { type: String },
   friendCode: { type: String, required: true },
   password: { type: String, required: true },
-  avatar: { type: String, default: 'https://i.pravatar.cc/150' },
+  avatar: { type: String },
   status: { type: String, default: 'offline' }, 
   friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   incomingRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
@@ -162,7 +177,7 @@ const Message = mongoose.model('Message', MessageSchema);
 
 const BotSchema = new mongoose.Schema({
   name: { type: String, required: true },
-  avatar: { type: String, default: "https://i.imgur.com/Xw8a9qK.png" }, // Varsayılan Bot Resmi
+  avatar: { type: String }, // Varsayılan Bot Resmi
   type: { type: String, default: 'music', enum: ['music', 'moderation'] }, // İleride başka botlar eklersin
   
   // Hangi sunucuya ait?
@@ -264,7 +279,18 @@ app.post('/api/register', async (req, res) => {
     const friendCode = generateFriendCode();
     const nickname = username;
 
-    const newUser = new User({ username, nickname, friendCode, password: hashedPassword });
+    // 👇 YENİ KISIM: İSİM LİSTESİNDEN SEÇİM
+    const avatarNames = ['nova', 'silas', 'arlo', 'maya', 'felix', 'jasper', 'luna'];
+    
+    // Listeden rastgele bir isim seç
+    const randomName = avatarNames[Math.floor(Math.random() * avatarNames.length)];
+
+    // URL'i oluştur
+    const protocol = req.protocol;
+    const host = req.get('host');
+    const avatarUrl = `${protocol}://${host}/avatars/${randomName}.png`;
+
+    const newUser = new User({ username, nickname, friendCode, password: hashedPassword, avatar: avatarUrl });
     await newUser.save();
     res.status(201).json({ message: 'Kullanıcı oluşturuldu!', friendCode });
   } catch (err) {
@@ -298,6 +324,47 @@ app.post('/api/login', async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: 'Sunucu hatası' });
   }
+});
+
+// ==========================================
+// 🔥 LIVEKIT TOKEN API'Sİ (GÜNCELLENMİŞ) 🔥
+// ==========================================
+app.post('/api/livekit/token', async (req, res) => {
+    console.log(`ApiKey Kontrol: [${process.env.LIVEKIT_API_KEY}]`);
+    console.log(`Secret Kontrol: [${process.env.LIVEKIT_API_SECRET}]`);
+    try {
+        const { roomName, userId, username, avatar } = req.body;
+
+        if (!roomName || !userId || !username) {
+            return res.status(400).json({ error: 'Eksik parametreler' });
+        }
+
+        // Token Oluştur
+        const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
+            identity: String(userId), // 👈 DİKKAT: userId'yi String'e çevirmek daha güvenlidir
+            name: username,
+            metadata: JSON.stringify({ 
+                avatar: avatar
+            }),
+        });
+
+        at.addGrant({
+            roomJoin: true,
+            room: roomName,
+            canPublish: true,
+            canSubscribe: true,
+            canUpdateOwnMetadata: true,
+        });
+
+        // ✅ await burada var, bu çok önemli!
+        const token = await at.toJwt();
+
+        console.log(`🎟️ Token verildi: ${username} -> ${roomName}`); // Log eklemek iyidir
+        res.json({ token });
+    } catch (err) {
+        console.error("Token hatası:", err);
+        res.status(500).json({ error: 'Token oluşturulamadı' });
+    }
 });
 
 // 1. KULLANICININ VERİLERİNİ GETİR
@@ -876,8 +943,8 @@ app.post('/api/friends/request', async (req, res) => {
     const senderUser = await User.findById(senderId);
     if (!targetUser) return res.status(404).json({ message: "Kullanıcı bulunamadı!" });
     if (targetUser._id.toString() === senderId) return res.status(400).json({ message: "Kendine istek atamazsın!" });
-    if (targetUser.incomingRequests.includes(senderId)) return res.status(400).json({ message: "Zaten istek gönderilmiş." });
-    if (targetUser.friends.includes(senderId)) return res.status(400).json({ message: "Zaten arkadaşsınız." });
+    if (targetUser.incomingRequests.includes(senderId)) return res.status(400).json({ message: "Zaten istek gönderilmiş!" });
+    if (targetUser.friends.includes(senderId)) return res.status(400).json({ message: "Zaten arkadaşsınız!" });
 
     targetUser.incomingRequests.push(senderId);
     senderUser.outgoingRequests.push(targetUser._id);
@@ -979,23 +1046,103 @@ app.get('/api/stream/play', (req, res) => {
     }
 });
 
-// --- SOCKET OLAYLARI (GÜNCELLENDİ: Hata Düzeltmeleri & 2sn) ---
-const usersInRoom = {}; 
-const socketToRoom = {}; 
+// ==========================================
+// 🔔 GÜÇLENDİRİLMİŞ WEBHOOK ROTASI
+// ==========================================
+app.post('/api/livekit/webhook', async (req, res) => {
+    try {
+        console.log("📨 Webhook İsteği Geldi!"); // Log 1
+
+        // WebhookReceiver'ı başlat (Key ve Secret'ın LiveKit sunucusuyla aynı olduğundan emin ol)
+        const webhookReceiver = new WebhookReceiver(LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
+
+        // 👇 DEBUG: Bakalım rawBody yakalanmış mı?
+        if (!req.rawBody) {
+            console.error("❌ HATA: req.rawBody BOŞ! Middleware çalışmıyor.");
+            // RawBody yoksa işlem yapma, hatayı baştan gör
+            return res.status(500).send("Middleware Error");
+        } else {
+            console.log("✅ Başarılı: req.rawBody yakalandı.");
+        }
+
+        const bodyToUse = req.rawBody || req.body;
+        // Gelen veriyi doğrula ve oku
+        const event = await webhookReceiver.receive(bodyToUse, req.get('Authorization'));
+
+        console.log("🔔 LiveKit Olayı Tipi:", event.event); // Log 2
+        console.log("🏠 Oda:", event.room?.name);
+
+        // İlgilendiğimiz olaylar: Katılma ve Ayrılma
+        if (event.event === 'participant_joined' || event.event === 'participant_left') {
+            const roomName = event.room.name;
+            const participant = event.participant;
+            
+            // Metadata içindeki avatarı çözümle
+            let avatar = "";
+            try {
+                if (participant.metadata) {
+                    const meta = JSON.parse(participant.metadata);
+                    avatar = meta.avatar || avatar;
+                }
+            } catch(e) {}
+
+            const userObj = {
+                _id: participant.identity,
+                username: participant.name,
+                nickname: participant.name,
+                avatar: avatar
+            };
+
+            // Hafızayı başlat
+            if (!globalVoiceState[roomName]) globalVoiceState[roomName] = [];
+
+            // Listeyi temizle (Önce eskiyi sil)
+            globalVoiceState[roomName] = globalVoiceState[roomName].filter(p => p._id !== userObj._id);
+
+            // Eğer katıldıysa listeye ekle
+            if (event.event === 'participant_joined') {
+                globalVoiceState[roomName].push(userObj);
+                console.log(`➕ ${userObj.username} odaya eklendi.`);
+            } else {
+                console.log(`➖ ${userObj.username} odadan çıktı.`);
+            }
+
+            // 🔥 SOCKET İLE GÖNDER
+            console.log("📡 Socket yayını yapılıyor: voice_state_update");
+            io.emit('voice_state_update', globalVoiceState);
+        }
+
+        res.status(200).send('ok');
+    } catch (error) {
+        console.error("❌ Webhook Hatası:", error); // Log 3 (Hata varsa burada görürüz)
+        res.status(500).send('error');
+    }
+});
+
+// 💡 İPUCU: Kullanıcı siteye ilk girdiğinde (F5 attığında) mevcut durumu görmek ister.
+// Socket bağlantısı kurulduğunda ona mevcut listeyi gönderelim.
+io.on('connection', (socket) => {
+    console.log('Bir kullanıcı bağlandı:', socket.id);
+    socket.emit('voice_state_update', globalVoiceState); // Hoşgeldin paketi
+
+    // ... diğer socket dinleyicilerin ...
+});
+
+// --- SOCKET.IO GÜNCELLEMESİ ---
 const userSocketMap = new Map();
 const userDisconnectTimers = new Map();
-const voiceSessions = {}; // { roomID: [ { userId, socketId, user: {} } ] }
 
 io.on('connection', async (socket) => {
   console.log(`🔌 Yeni Bağlantı: ${socket.id}`);
 
-  // 1. KULLANICI GİRİŞİ (Auto-Login Dahil)
+  socket.emit('voice_state_update', globalVoiceState);
+
+  // 1. KULLANICI GİRİŞİ (Status Takibi İçin)
   socket.on('register_socket', async (userId) => {
     if (userId) {
       socket.join(userId);
       socket.userId = userId;
 
-      // F5 attıysa zamanlayıcıyı iptal et
       if (userDisconnectTimers.has(userId)) {
           clearTimeout(userDisconnectTimers.get(userId));
           userDisconnectTimers.delete(userId);
@@ -1008,16 +1155,9 @@ io.on('connection', async (socket) => {
       }
       userSockets.add(socket.id);
 
-      // --- DÜZELTME BURADA ---
-      // Şu anki Redis durumunu kontrol et
       const currentRedisStatus = await getUserStatus(userId);
-
-      // EĞER (İlk sekme ise) VEYA (Redis'te offline görünüyorsa - Senkron hatası varsa)
-      // Onu zorla ONLINE yap ve herkese bildir.
       if (userSockets.size === 1 || currentRedisStatus === 'offline') {
-          console.log(`✅ Redis: Kullanıcı Online -> ${userId} (Sync Fix)`);
           await setUserStatus(userId, 'online');
-          
           const user = await User.findById(userId).lean();
           if (user) {
              delete user.password;
@@ -1028,13 +1168,11 @@ io.on('connection', async (socket) => {
     }
   });
 
-  // --- SOCKET.IO KISMI ---
-
+  // 2. CHAT MESAJLARI
   socket.on('chat_message', async (data) => {
       try {
         const user = await User.findOne({ username: data.username });
         if (user) {
-          // 1. Önce Mesajı Kaydet (Standart İşlem)
           const newMessage = new Message({
             content: data.content,
             sender: user._id,
@@ -1043,274 +1181,45 @@ io.on('connection', async (socket) => {
           await newMessage.save();
           const populatedMsg = await newMessage.populate('sender', 'username nickname avatar color');
           io.emit('chat_message', populatedMsg);
-
-          // -----------------------------------------------------
-          // 🤖 BOT MANTIĞI: Müzik Komutu Algılama
-          // -----------------------------------------------------
-          if (data.content.startsWith('!play ')) {
-              // Kullanıcı ses kanalında mı kontrolü
-              
-              if (!data.voiceChannelId) {
-                  // İstersen burada chat'e hata mesajı gönderebilirsin
-                  console.log("Kullanıcı ses kanalında değil, bot katılamaz.");
-                  return; // İşlemi durdur
-              }
-              // A) Kanalın Müzik Kanalı olup olmadığını kontrol et
-              const channel = await Channel.findById(data.channelId);
-              if (channel && channel.subtype === 'music') {
-                  
-                  const videoLink = data.content.split(' ')[1]; // !play https://youtube...
-                  console.log(data);
-                  
-                  let musicBot = await Bot.findOne({ serverId: channel.serverId, type: 'music' });
-                  musicBot.currentVoiceChannel = data.voiceChannelId; // Ses Kanalı ID (Görünüm için)
-                  musicBot.boundTextChannel = data.channelId;         // Metin Kanalı ID (Mesajlaşma için)
-                  musicBot.isOnline = true;
-                  musicBot.currentSongUrl = videoLink;
-                  await musicBot.save();
-                  
-                  // 3. SOHBETE MESAJ YAZ (Gerçek Bot Objesiyle)
-                  const botChatMsg = {
-                      _id: new mongoose.Types.ObjectId(),
-                      content: `🎵 Çalınıyor: ${videoLink}`,
-                      sender: {
-                          _id: musicBot._id,
-                          nickname: musicBot.name,
-                          avatar: musicBot.avatar,
-                          username: "Bot",
-                          type: "bot" // Frontend bunu görünce "BOT" etiketi basabilir
-                      },
-                      senderNickname: musicBot.name,
-                      channelId: musicBot.boundTextChannel,
-                      timestamp: new Date()
-                  };
-                  
-                  io.emit('chat_message', botChatMsg);
-
-                  // 4. STREAM BAŞLAT VE HERKESE HABER VER
-                  // Frontend'e hem müziği hem de botun bilgilerini yolluyoruz
-                  const serverStreamUrl = `http://localhost:5000/api/stream/play?url=${encodeURIComponent(videoLink)}`;
-
-                  // Biraz gecikmeli cevap ver (Gerçekçilik için)
-                  setTimeout(() => {
-                    console.log("sorun yok");
-                    
-                      io.emit('music_command', { 
-                          action: 'play', 
-                          url: serverStreamUrl, 
-                          requester: user.nickname,
-                          bot: musicBot // Botun bilgilerini de yolluyoruz ki ekranda görünsün
-                      });
-                  }, 500);
-              } 
-          }
-          // -----------------------------------------------------
-
+          
+          // NOT: Müzik botu komutlarını (!play) şimdilik kaldırdık veya pasif bıraktık.
+          // Çünkü LiveKit ile müzik botu yapmak için "SIP/Ingress" servisi gerekir.
+          // Eski HTTP stream yöntemi LiveKit odasının içine ses vermez.
         }
       } catch (err) { console.error(err); }
   });
 
-  socket.on('music_ended', async (data) => {
-      // Tüm kullanıcılara "Müziği durdur ve botu kaldır" emri ver
-      io.emit('music_command', { action: 'stop' });
-      
-      // Veritabanında botu boşa çıkar (Opsiyonel, temizlik için)
-      // await Bot.updateMany({ currentVoiceChannel: ... }, { currentVoiceChannel: null });
-  });
-
-  // GÜNCELLENMİŞ JOIN VOICE ROOM
-  socket.on("join_voice_room", async (roomID) => {
-    // 1. Kullanıcıyı Veritabanından Bul (Avatar ve İsim için)
-    // socket.userId'yi login/register socket olayında kaydetmiştik.
-    if (!socket.userId) return; 
-    
-    const user = await User.findById(socket.userId).lean();
-    if (!user) return;
-
-    // 2. Ses Oturumları Listesine Ekle
-    if (!voiceSessions[roomID]) {
-        voiceSessions[roomID] = [];
-    }
-
-    // Eğer zaten listede varsa ekleme (Duplicate önle)
-    const isAlreadyIn = voiceSessions[roomID].find(u => u.userId === socket.userId);
-    if (!isAlreadyIn) {
-        voiceSessions[roomID].push({
-            userId: socket.userId,
-            socketId: socket.id,
-            user: user // Tüm kullanıcı bilgisi (Avatar, Nickname vs.)
-        });
-    }
-
-    // 3. Socket Odasına Katıl
-    socket.join(roomID);
-
-    // 4. WEBRTC SİNYALİ İÇİN: Odadaki diğerlerini bul (Eski mantık - Bağlantı için gerekli)
-    // usersInRoom mantığını da burada güncelleyelim veya voiceSessions üzerinden gidelim.
-    // WebRTC sinyalleşmesi için sadece Socket ID'ler yeterli.
-    const usersInThisRoom = voiceSessions[roomID]
-        .filter(u => u.socketId !== socket.id)
-        .map(u => u.socketId);
-
-    socket.emit("all_users_in_voice", usersInThisRoom);
-
-    // 5. GÖRSEL LİSTE İÇİN: Bana içerideki herkesin detayını gönder
-    const participantsList = voiceSessions[roomID].map(u => ({
-        user: u.user,
-        isSpeaking: false,
-        isSelf: u.userId === socket.userId
-    }));
-    socket.emit("voice_room_participants", participantsList);
-
-    // 6. DİĞERLERİNE HABER VER: "Yeni biri geldi, bilgileri bu"
-    socket.to(roomID).emit("user_joined_voice_visual", {
-        user: user,
-        isSpeaking: false,
-        isSelf: false
-    });
-
-    // 7. GLOBAL GÜNCELLEME: Tüm sunucuya bu kanalda kimlerin olduğunu duyur 📢
-    // (Böylece kanalda olmayanlar da kimin orada olduğunu görür)
-    const usersInChannel = voiceSessions[roomID].map(u => u.user); // Sadece user objelerini al
-    io.emit("voice_channel_state", { 
-        channelId: roomID, 
-        users: usersInChannel 
-    });
-  });
-
-  // H) SES ODASINDAN MANUEL ÇIKIŞ (Disconnect butonu ile) 📞
-  socket.on("leave_voice_room", (roomID) => {
-      if (voiceSessions[roomID]) {
-          // 1. Kullanıcıyı listeden bul ve sil
-          const index = voiceSessions[roomID].findIndex(u => u.socketId === socket.id);
-          
-          if (index !== -1) {
-              const leavingUser = voiceSessions[roomID][index];
-              voiceSessions[roomID].splice(index, 1);
-
-              // 2. Eğer oda boşaldıysa sil
-              if (voiceSessions[roomID].length === 0) {
-                  delete voiceSessions[roomID];
-              }
-
-              // 3. WebRTC Bağlantılarını Kestir
-              socket.to(roomID).emit('user_left_voice', socket.id);
-
-              // 4. LİSTEYİ GÜNCELLE (Global Yayın) 📢
-              // Kalanların listesini herkese gönder ki Frontend güncellensin
-              const remainingUsers = voiceSessions[roomID] ? voiceSessions[roomID].map(u => u.user) : [];
-              
-              io.emit("voice_channel_state", { 
-                  channelId: roomID, 
-                  users: remainingUsers 
-              });
-              
-              // (Sadece odadakiler için görsel silme sinyali - opsiyonel ama iyi olur)
-              socket.to(roomID).emit('user_left_voice_visual', leavingUser.userId);
-              
-              // Socket'i odadan ayır
-              socket.leave(roomID);
-          }
-      }
-  });
-
-  // İLK AÇILIŞ: İstemci tüm ses kanallarının durumunu sorar
-  socket.on("get_voice_states", (serverId) => {
-     // Basitlik için tüm voiceSessions'ı tarayıp o sunucuya ait kanalları bulabiliriz
-     // Veya şimdilik tüm aktif ses kanallarını gönderelim (Client ID ile eşleştirir)
-     
-     const allStates = {};
-     for (const [channelId, sessionList] of Object.entries(voiceSessions)) {
-         allStates[channelId] = sessionList.map(u => u.user);
-     }
-     socket.emit("all_voice_states", allStates);
-  });
-
-  // K) DM ODASINA KATIL (Artık gerçek Channel ID ile)
+  // 3. DM ve GENEL ODALAR
   socket.on("join_dm_room", (roomId) => {
-      // roomId artık veritabanındaki gerçek _id (ObjectId string hali)
       socket.join(roomId);
-      console.log(`💬 Kullanıcı DM odasına katıldı: ${roomId}`);
   });
 
-  // KONUŞMA SİNYALİ (Voice Activity) 🗣️
-  socket.on("speaking_status", ({ roomID, isSpeaking }) => {
-      // O odadaki diğer herkese "Bu arkadaş konuşuyor/sustu" de
-      // socket.to(roomID) kullanıyoruz ki kendimize geri gelmesin
-      socket.to(roomID).emit("user_speaking_change", { 
-          userId: socket.userId, // socket.userId'yi login olurken kaydetmiştik
-          isSpeaking 
-      });
-  });
-  
-  socket.on("sending_signal", payload => { io.to(payload.userToSignal).emit("user_joined_voice", { signal: payload.signal, callerID: payload.callerID }); });
-  socket.on("returning_signal", payload => { io.to(payload.callerID).emit("receiving_returned_signal", { signal: payload.signal, id: socket.id }); });
+  // ----------------------------------------------------------------------
+  // 🗑️ SİLİNEN KISIMLAR:
+  // join_voice_room, leave_voice_room, sending_signal, returning_signal
+  // speaking_status, music_ended, voiceSessions...
+  //
+  // ARTIK GEREK YOK! LiveKit bunların hepsini kendi sunucusunda yönetiyor.
+  // Frontend, LiveKit SDK kullanarak odaya bağlanacak.
+  // ----------------------------------------------------------------------
 
-  // --- BAĞLANTI KOPTUĞUNDA (disconnect) ---
+  // --- BAĞLANTI KOPTUĞUNDA ---
   socket.on('disconnect', async () => {
-    
-    // 1. SES ODASI TEMİZLİĞİ (Voice Cleanup) 🎤
-    // Bu socket herhangi bir ses odasında mıydı?
-    for (const roomID in voiceSessions) {
-        const index = voiceSessions[roomID].findIndex(u => u.socketId === socket.id);
-        
-        if (index !== -1) {
-            const leavingUser = voiceSessions[roomID][index];
-            
-            // Listeden sil
-            voiceSessions[roomID].splice(index, 1);
-            
-            // Eğer oda tamamen boşaldıysa, odayı memory'den sil
-            if (voiceSessions[roomID].length === 0) {
-                delete voiceSessions[roomID];
-            } else {
-                // Odada kalanlara haber ver:
-                
-                // A) WebRTC Bağlantısını Kes (Socket ID ile çalışır)
-                socket.to(roomID).emit('user_left_voice', socket.id);
-                
-                // B) Görsel Listeden Sil (User ID ile çalışır - Avatarı kaldırmak için)
-                socket.to(roomID).emit('user_left_voice_visual', leavingUser.userId);
-            }
-
-            // GLOBAL GÜNCELLEME: Biri çıktı, güncel listeyi herkese duyur 📢
-            // Eğer oda silindiyse (kimse kalmadıysa) boş liste gönder
-            const remainingUsers = voiceSessions[roomID] ? voiceSessions[roomID].map(u => u.user) : [];
-            io.emit("voice_channel_state", { 
-                channelId: roomID, 
-                users: remainingUsers 
-            });
-
-            break; // Bir socket aynı anda tek odada olabilir, bulduk ve çıktık.
-        }
-    }
-
-    // 2. ONLINE/OFFLINE DURUM TEMİZLİĞİ (Status Cleanup) 🟢⚫
+    // Sadece Online/Offline takibi yapıyoruz. Ses odası temizliğine gerek kalmadı.
     if (socket.userId) {
         const userId = socket.userId;
         const userSockets = userSocketMap.get(userId);
 
         if (userSockets) {
             userSockets.delete(socket.id);
-
-            // Eğer kullanıcının hiç açık sekmesi kalmadıysa
             if (userSockets.size === 0) {
-                // Varsa eski sayacı iptal et
                 if (userDisconnectTimers.has(userId)) clearTimeout(userDisconnectTimers.get(userId));
-
-                // 2 Saniye bekle (F5 atarsa hemen offline yapmamak için)
                 const timer = setTimeout(async () => {
                     const currentSockets = userSocketMap.get(userId);
                     if (!currentSockets || currentSockets.size === 0) {
-                        
-                        console.log(`❌ Redis: Kullanıcı Offline -> ${userId}`);
                         userSocketMap.delete(userId);
                         userDisconnectTimers.delete(userId);
-
-                        // Redis ve DB güncelle
                         await setUserStatus(userId, 'offline');
-
-                        // Diğerlerine haber ver
                         const user = await User.findById(userId).lean();
                         if (user) {
                             delete user.password;
@@ -1319,7 +1228,6 @@ io.on('connection', async (socket) => {
                         }
                     }
                 }, 2000); 
-
                 userDisconnectTimers.set(userId, timer);
             }
         }
@@ -1327,7 +1235,7 @@ io.on('connection', async (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT;
 server.listen(PORT, () => {
   console.log(`🚀 Sunucu ${PORT} portunda çalışıyor`);
 });

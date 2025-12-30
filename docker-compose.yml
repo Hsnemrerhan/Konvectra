@@ -11,14 +11,13 @@ services:
     # Frontend'in backend açıldıktan sonra başlaması iyi olur
     depends_on:
       - backend
-      
+
   backend:
     build: ./backend
     ports:
       - "5000:5000"
-    environment:
-      - MONGO_URI=mongodb://mongo:27017/discord_clone
-      - REDIS_HOST=redis
+    env_file:
+      - .env
     depends_on:
       - mongo
       - redis

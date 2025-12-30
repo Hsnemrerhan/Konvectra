@@ -1,9 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import io from 'socket.io-client';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { FaHashtag, FaVolumeUp, FaPlus, FaCog, FaAngleDown, FaMusic, FaMicrophoneSlash } from 'react-icons/fa';
 
 // --- BİLEŞENLER ---
 import Sidebar from './components/Layout/Sidebar';
-import ChannelList from './components/Layout/ChannelList'; // Sunucu içi menü
+import ChannelList from './components/Layout/ChannelList'; 
+import UserProfile from './components/Layout/UserProfile';
 import ChatArea from './components/Chat/ChatArea';
 import AuthForm from './components/AuthForm';
 import CreateServerModal from './components/Modals/CreateServerModal';
@@ -12,14 +15,16 @@ import UserList from './components/Layout/UserList';
 import UserSettingsModal from './components/Modals/UserSettingsModal';
 import ChannelDeletedModal from './components/Modals/ChannelDeletedModal';
 import WelcomeModal from './components/Modals/WelcomeModal';
+import FeedbackModal from './components/Modals/FeedbackModal';
 import ServerSettingsModal from './components/Modals/ServerSettingsModal';
 import KickedModal from './components/Modals/KickedModal';
-import VoiceRoom from './components/Voice/VoiceRoom';
 import ServerWelcome from './components/Server/ServerWelcome';
 import CreateChannelModal from './components/Modals/CreateChannelModal';
 import HomeView from './components/Home/HomeView';
-import { useNavigate, useLocation } from 'react-router-dom';
+import VoiceConnectionPanel from './components/Voice/VoiceConnectionPanel';
 
+// 👇 YENİ: LiveKit Bileşeni (Eski VoiceRoom yerine)
+import VoiceChannel from './components/Voice/VoiceChannel';
 
 const API_URL = `http://${window.location.hostname}:5000`;
 const socket = io(API_URL, { transports: ["websocket"], reconnectionAttempts: 5 });
@@ -32,109 +37,100 @@ function App() {
   const location = useLocation();
   
   // UI States
-  const [activeServer, setActiveServer] = useState(null); // null = Home
+  const [activeServer, setActiveServer] = useState(null); 
   const [activeChannel, setActiveChannel] = useState(null);
-  const [activeTab, setActiveTab] = useState('online'); // Home sekmeleri: online, all, pending, add
+  const [activeTab, setActiveTab] = useState('online'); 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showServerSettings, setShowServerSettings] = useState(false);
-  const [voiceParticipants, setVoiceParticipants] = useState([]);
-  const [isMicMuted, setIsMicMuted] = useState(false); // Mikrofon Kapalı mı?
-  const [isDeafened, setIsDeafened] = useState(false); // Sağırlaştırıldı mı? (Hoparlör kapalı)
   const [createModal, setCreateModal] = useState({ isOpen: false, type: 'text' });
-  
-  
   
   // Data States
   const [myServers, setMyServers] = useState([]);
   const [messages, setMessages] = useState([]);
   const [friends, setFriends] = useState([]);
   const [incomingRequests, setIncomingRequests] = useState([]);
-  const [hasMoreMessages, setHasMoreMessages] = useState(true); // Daha yüklenecek mesaj var mı?
-  const [isMessagesLoading, setIsMessagesLoading] = useState(false); // Şu an yükleniyor mu?
+  const [hasMoreMessages, setHasMoreMessages] = useState(true); 
+  const [isMessagesLoading, setIsMessagesLoading] = useState(false); 
   const [deletedChannelData, setDeletedChannelData] = useState(null);
   const [welcomeData, setWelcomeData] = useState(null);
-  const [kickedData, setKickedData] = useState(null); // Atılma verisi
-  const [activeVoiceChannel, setActiveVoiceChannel] = useState(null); // Şu an hangi ses kanalındayım?
+  const [kickedData, setKickedData] = useState(null); 
+  const [voiceParticipants, setVoiceParticipants] = useState([]);
   const [allVoiceStates, setAllVoiceStates] = useState({});
-  const [activeBot, setActiveBot] = useState(null);
+  const [isMicMuted, setIsMicMuted] = useState(false);
+  const [isDeafened, setIsDeafened] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
   
+  // 🎤 YENİ SES STATE'İ
+  // Sadece hangi kanalda olduğumuzu tutuyoruz. Katılımcıları LiveKit hallediyor.
+  const [activeVoiceChannel, setActiveVoiceChannel] = useState(null); 
 
   // Form Inputs
-  const [friendInput, setFriendInput] = useState(''); // Arkadaş ekleme inputu
+  const [friendInput, setFriendInput] = useState(''); 
+
+  // 👇 MODAL STATE'İ
+const [feedback, setFeedback] = useState({
+    isOpen: false,
+    type: 'success', // success, error, warning
+    title: '',
+    message: ''
+});
+
+// Modal Kapatma Yardımcısı
+const closeFeedback = () => {
+    setFeedback(prev => ({ ...prev, isOpen: false }));
+};
 
   const openCreateModal = (type) => { 
       setCreateModal({ isOpen: true, type }); 
   };
   
-
-  // ---------------------------------------------------------
-  // YENİLENMİŞ: AKILLI YÖNLENDİRME (SMART ROUTING) 🧠
-  // ---------------------------------------------------------
+  // --- AKILLI YÖNLENDİRME (ROUTING) ---
   useEffect(() => {
-    // 1. Kök dizin -> Home'a yönlendir
     if (location.pathname === '/') {
         navigate('/servers/@me');
         return;
     }
-
-    // 2. Home Modu
     if (location.pathname.includes('/servers/@me')) {
         setActiveServer(null);
         setActiveChannel(null);
         return;
     }
-
-    // 3. Sunucu Modu (/servers/ID...)
     if (myServers.length > 0 && location.pathname.includes('/servers/')) {
-        
         const parts = location.pathname.split('/');
         const serverId = parts[2]; 
-        const channelId = parts[4]; // Varsa kanal ID'si
+        const channelId = parts[4]; 
 
         if (serverId) {
             const targetServer = myServers.find(s => s._id === serverId);
-            
             if (targetServer) {
-                // Sunucu state'ini güncelle
                 if (activeServer?._id !== targetServer._id) {
                     setActiveServer(targetServer);
                 }
 
-                // --- AKILLI YÖNLENDİRME MANTIĞI ---
-                
-                // Metin kanallarını bul
                 const textChannels = targetServer.channels?.filter(c => c.type === 'text') || [];
                 const firstTextChannel = textChannels[0];
 
-                // DURUM 1: HİÇ METİN KANALI YOKSA -> ZORUNLU WELCOME
                 if (textChannels.length === 0) {
-                    // Eğer zaten welcome sayfasında değilsek, oraya at
                     if (!location.pathname.includes('/welcome')) {
                         navigate(`/servers/${serverId}/welcome`, { replace: true });
                     }
                     setActiveChannel(null);
-                    return; // İşlem bitti
+                    return; 
                 }
 
-                // DURUM 2: METİN KANALI VAR AMA KULLANICI WELCOME'DA VEYA ROOT'TA
-                // (Kanal varken Welcome sayfasını görmemeli, direkt kanala uçmalı)
                 if (location.pathname.includes('/welcome') || !channelId) {
                     if (firstTextChannel) {
                         navigate(`/servers/${serverId}/channels/${firstTextChannel._id}`, { replace: true });
                     }
-                    return; // Yönlendirme yapıldı, işlem bitti
+                    return; 
                 }
 
-                // DURUM 3: BELİRLİ BİR KANAL SEÇİLMİŞ
                 if (channelId) {
                     const targetChannel = targetServer.channels?.find(c => c._id === channelId);
-                    
                     if (targetChannel) {
                         setActiveChannel(targetChannel);
-                        
-                        // Mesajları çek (Sadece kanal değiştiyse)
                         if (activeChannel?._id !== targetChannel._id) {
                             setMessages([]); 
                             setHasMoreMessages(true);
@@ -147,86 +143,54 @@ function App() {
     }
   }, [location.pathname, myServers]);
 
-  
-
-  // Kanal değişince mesajları çek
   useEffect(() => {
-      // Sadece activeChannel DOLU ise ve bir ID'si varsa çek
       if (activeChannel && activeChannel._id) {
-          setMessages([]); // Önceki kanalın mesajlarını temizle
+          setMessages([]); 
           setHasMoreMessages(true);
           fetchMessages(activeChannel._id);
       }
-  }, [activeChannel?._id]); // Sadece ID değiştiğinde tetikle
+  }, [activeChannel?._id]); 
 
   // --- DATA FETCHING & SOCKET ---
   useEffect(() => {
     if (token && currentUser.id) {
       fetchUserData();
       
-      // 1. ÖNEMLİ: Socket'e kim olduğunu bildir (Backend'deki odaya katılmak için)
+      // Socket'e kim olduğunu bildir (Online status için)
       socket.emit('register_socket', currentUser.id);
 
-      socket.emit("get_voice_states");
+      socket.on('chat_message', (msg) => {setMessages(prev => [...prev, msg]);});
 
-      // Mevcut dinleyiciler
-      
-      socket.on('chat_message', (msg) => {setMessages(prev => {return [...prev, msg];});});
-
-      // --- YENİ EKLENEN CANLI BİLDİRİMLER ---
-      
-      // A) Biri bana istek attı!
       socket.on('new_friend_request', (senderUser) => {
-          // Listeye ekle (Eğer zaten yoksa)
           setIncomingRequests(prev => {
               if (prev.find(req => req._id === senderUser._id)) return prev;
               return [...prev, senderUser];
           });
-          // Küçük bir ses veya bildirim efekti de eklenebilir
-          // alert("Yeni bir arkadaşlık isteği aldın!");
       });
 
-      // B) Biri isteğimi kabul etti veya ben kabul ettim!
       socket.on('friend_request_accepted', (newFriend) => {
-          // 1. Arkadaş listesine ekle
           setFriends(prev => [...prev, newFriend]);
-          
-          // 2. Bekleyenler listesinden çıkar (Eğer oradaysa)
           setIncomingRequests(prev => prev.filter(req => req._id !== newFriend._id));
       });
 
-      // C) BİR KULLANICI PROFİLİNİ GÜNCELLEDİ (Avatar, Nickname, Durum)
       socket.on('user_updated', (updatedUser) => {
-          
-          // 1. Kendi profilimse güncelle
-          // (currentUser state'ine erişmek yerine ID kontrolünü direkt yapıyoruz)
           const currentUserId = JSON.parse(localStorage.getItem('user'))?._id; 
           if (updatedUser._id === currentUserId) {
               const freshMe = { ...updatedUser, id: updatedUser._id };
               setCurrentUser(freshMe);
               localStorage.setItem('user', JSON.stringify(freshMe));
           }
-
-          // 2. Arkadaş listesini güncelle (Fonksiyonel Update)
           setFriends(prev => prev.map(f => f._id === updatedUser._id ? updatedUser : f));
-
-          // 3. Bekleyen istekleri güncelle
           setIncomingRequests(prev => prev.map(req => req._id === updatedUser._id ? updatedUser : req));
 
-          // 4. Aktif sunucudaki üye listesini güncelle
           setActiveServer(prevServer => {
               if (!prevServer) return null;
-              
-              // Sadece durumu güncellemek yetmez, üye listesinde var mı diye bakmak lazım
               const isMember = prevServer.members.some(m => m.user._id === updatedUser._id);
-              
               if (!isMember) return prevServer;
-
               return {
                   ...prevServer,
                   members: prevServer.members.map(member => {
                       if (member.user._id === updatedUser._id) {
-                          // Tüm kullanıcı objesini yenile (Status dahil)
                           return { ...member, user: updatedUser };
                       }
                       return member;
@@ -234,30 +198,19 @@ function App() {
               };
           });
 
-          // 👇 YENİ: MESAJLARDAKİ AVATARLARI DA GÜNCELLE
         setMessages(prevMessages => prevMessages.map(msg => {
-            // Mesajın göndereni güncellenen kullanıcı mı?
             const senderId = typeof msg.sender === 'object' ? msg.sender._id : msg.sender;
-            
             if (senderId === updatedUser._id) {
-                // Eğer sender bir obje ise (populate edilmişse) içini güncelle
                 if (typeof msg.sender === 'object') {
-                    return { 
-                        ...msg, 
-                        sender: { ...msg.sender, avatar: updatedUser.avatar, nickname: updatedUser.nickname } 
-                    };
+                    return { ...msg, sender: { ...msg.sender, avatar: updatedUser.avatar, nickname: updatedUser.nickname } };
                 }
-                // Populate edilmemişse yapacak bir şey yok (veya senderAvatar string'ini güncellersin)
                 return msg;
             }
             return msg;
         }));
       });
 
-      // D) KANAL SİLİNDİ (GÜNCELLENMİŞ)
       socket.on('channel_deleted', ({ channelId, serverId, channelName, deleterName }) => {
-          
-          // 1. Listeleri Güncelle (Kanalı UI'dan sil)
           setMyServers(prevServers => prevServers.map(server => {
               if (server._id === serverId) {
                   return { ...server, channels: server.channels.filter(c => c._id !== channelId) };
@@ -272,70 +225,40 @@ function App() {
               return prevServer;
           });
 
-          // 2. KONTROL: Eğer ben o kanaldaysam MODALI AÇ
-          const currentPath = window.location.pathname; // /servers/XXX/channels/YYY
+          const currentPath = window.location.pathname; 
           if (currentPath.includes(channelId)) {
-             // Alert yerine State'i dolduruyoruz -> Modal açılır
-             setDeletedChannelData({ 
-                 channelName, 
-                 deleterName, 
-                 serverId 
-             });
+             setDeletedChannelData({ channelName, deleterName, serverId });
           }
       });
 
-      // ... diğer socket dinleyicileri ...
-
-      // E) YENİ KANAL OLUŞTURULDU
       socket.on('channel_created', (newChannel) => {
-          // 1. Sunucu listesindeki ilgili sunucuyu bul ve kanal ekle
           setMyServers(prevServers => prevServers.map(server => {
               if (server._id === newChannel.serverId) {
-                  return { 
-                      ...server, 
-                      channels: [...(server.channels || []), newChannel] 
-                  };
+                  return { ...server, channels: [...(server.channels || []), newChannel] };
               }
               return server;
           }));
 
-          // 2. Eğer şu an o sunucu açıksa, ekrandaki listeyi de anlık güncelle
           setActiveServer(prevServer => {
               if (prevServer && prevServer._id === newChannel.serverId) {
-                  return { 
-                      ...prevServer, 
-                      channels: [...(prevServer.channels || []), newChannel] 
-                  };
+                  return { ...prevServer, channels: [...(prevServer.channels || []), newChannel] };
               }
               return prevServer;
           });
       });
 
-      // F) SUNUCUDAN ATILDIN (CANLI) 🦶
       socket.on('member_kicked', ({ serverId, serverName, kickerName }) => {
-          // 1. Sunucu listemden o sunucuyu sil
           setMyServers(prev => prev.filter(s => s._id !== serverId));
-
-          // 2. Eğer şu an o sunucudaysam -> Home'a at ve Modalı aç
           if (window.location.pathname.includes(serverId)) {
-              setActiveServer(null); // State'i temizle
-              navigate('/servers/@me'); // Ana sayfaya yönlendir
+              setActiveServer(null); 
+              navigate('/servers/@me'); 
           }
-
-          // 3. Her durumda o modalı göster (İster o sunucuda ol ister olma)
           setKickedData({ serverName, kickerName });
-          
-          // 4. Veritabanındaki bildirimi hemen temizle ki F5 atınca tekrar çıkmasın
-          // (Çünkü canlı gördük zaten)
           fetch(`${API_URL}/api/users/${currentUser.id}/notifications`, { method: 'DELETE' });
       });
 
-      // G) SUNUCU GÜNCELLENDİ (Rol eklendi, üye rolü değişti, isim değişti vb.)
       socket.on('server_updated', (updatedServer) => {
-          // 1. Sunucu listemdeki eski veriyi yenisiyle değiştir
           setMyServers(prev => prev.map(s => s._id === updatedServer._id ? updatedServer : s));
-
-          // 2. Eğer şu an o sunucudaysam, aktif sunucuyu da güncelle (Anlık renk değişimi için şart!)
           setActiveServer(prev => {
               if (prev && prev._id === updatedServer._id) {
                   return updatedServer;
@@ -344,62 +267,65 @@ function App() {
           });
       });
 
-      // H) BAŞKASI KONUŞUYOR/SUSTU
-      socket.on("user_speaking_change", ({ userId, isSpeaking }) => {
-          setVoiceParticipants(prev => prev.map(p => {
-              // Gelen ID, listedeki bir kullanıcıyla eşleşiyor mu?
-              if (p.user._id === userId || p.user.id === userId) {
-                  return { ...p, isSpeaking };
-              }
-              return p;
-          }));
-      });
+      socket.on('voice_state_update', (data) => {
+            console.log("Ses kanalları güncellendi:", data);
+            setAllVoiceStates(data);
+        });
 
-      // I) TÜM SES KANALLARI DURUMU (İLK YÜKLEME)
-      socket.on("all_voice_states", (states) => {
-          setAllVoiceStates(states);
-      });
-
-      // J) TEK BİR KANAL GÜNCELLENDİ (Biri girdi/çıktı)
-      socket.on("voice_channel_state", ({ channelId, users }) => {
-          setAllVoiceStates(prev => ({
-              ...prev,
-              [channelId]: users
-          }));
-      });
-
-      const handleMusicCommand = (data) => {
-            // Müzik başladıysa ve sunucu bot bilgisini gönderdiyse kaydet
-            console.log('HandleMusicCommand', data);
-            
-            if (data.action === 'play' && data.bot) {
-                setActiveBot(data.bot);
-            }
-            // Müzik durduysa botu temizle
-            if (data.action === 'stop') {
-                setActiveBot(null);
-            }
-        };
-
-        socket.on('music_command', handleMusicCommand);
+      // 🗑️ TEMİZLENEN SOCKET EVENTLERİ: 
+      // 'user_speaking_change', 'all_voice_states', 'voice_channel_state', 'music_command'
+      // Bunlar artık LiveKit veya backend'in yeni yapısı tarafından yönetilecek.
     }
 
-    // Temizlik (Unmount)
     return () => {
-        socket.off('load_messages');
         socket.off('chat_message');
-        socket.off('new_friend_request');      // Temizle
-        socket.off('friend_request_accepted'); // Temizle
+        socket.off('new_friend_request');      
+        socket.off('friend_request_accepted'); 
         socket.off('user_updated');
         socket.off('channel_deleted');
         socket.off('channel_created');
         socket.off('server_updated');
-        socket.off('user_speaking_change');
-        socket.off('all_voice_states');
-        socket.off('voice_channel_state');
-        socket.off('music_command', handleMusicCommand);
+        socket.off('member_kicked');
+        socket.off('voice_state_update');
     };
   }, [token, currentUser.id]);
+
+
+// 🔄 F5 SONRASI OTOMATİK BAĞLANMA (Rejoin)
+useEffect(() => {
+    // 1. Sunucu listesi (myServers) henüz yüklenmediyse bekle
+    if (!myServers || myServers.length === 0) return;
+
+    // 2. Hafızadaki son kanal ID'sini oku
+    const savedChannelId = sessionStorage.getItem('lastVoiceChannelId');
+
+    // 3. ID var ama state boşsa (yani sayfa yeni açıldıysa)
+    if (savedChannelId && !activeVoiceChannel) {
+        
+        let foundChannel = null;
+
+        // 4. `myServers` içindeki tüm sunucuları ve kanalları tara
+        for (const server of myServers) {
+            // Sunucunun kanalları var mı kontrol et
+            if (server.channels) {
+                const channel = server.channels.find(c => c._id === savedChannelId);
+                if (channel) {
+                    foundChannel = channel;
+                    break; // Bulduk, döngüyü bitir
+                }
+            }
+        }
+
+        // 5. Kanal hala mevcutsa bağlan
+        if (foundChannel) {
+            console.log(`🔄 Otomatik bağlanılıyor: ${foundChannel.name}`);
+            setActiveVoiceChannel(foundChannel);
+        } else {
+            // Kanal silinmişse veya artık erişim yoksa hafızayı temizle
+            sessionStorage.removeItem('lastVoiceChannelId');
+        }
+    }
+}, [myServers]); // 👈 myServers değiştiğinde (yüklendiğinde) çalışır
 
   const fetchUserData = async () => {
     try {
@@ -409,91 +335,53 @@ function App() {
       const res = await fetch(`${API_URL}/api/users/me?userId=${userId}`);
       const data = await res.json();
       
-      // 1. Sunucu Listesini Güncelle
       setMyServers(data.servers);
-      
-      // 2. Arkadaş Listelerini Güncelle
       setFriends(data.user.friends || []);
       setIncomingRequests(data.user.incomingRequests || []);
 
-      // 3. Kullanıcı Bilgisini Güncelle
       const freshUser = { ...data.user, id: data.user._id };
       setCurrentUser(freshUser);
       localStorage.setItem('user', JSON.stringify(freshUser));
 
-      // 4. KRİTİK DÜZELTME: Aktif Sunucuyu da Güncelle! 🛠️
-      // Eğer şu an bir sunucunun içindeysek (activeServer varsa),
-      // sunucudan yeni gelen listeden bu sunucunun GÜNCEL halini bulup state'e yazmalıyız.
       if (activeServer) {
           const updatedActiveServer = data.servers.find(s => s._id === activeServer._id);
-          // Eğer sunucu hala listedeyse (silinmemişse) güncelle
           if (updatedActiveServer) {
               setActiveServer(updatedActiveServer);
           } else {
-              // Sunucudan atılmış veya sunucu silinmiş olabilir, ana sayfaya at
               setActiveServer(null);
           }
       }
 
-      // 5. BEKLEYEN BİLDİRİM KONTROLÜ (Offline iken atıldıysa)
       if (data.user.notifications && data.user.notifications.length > 0) {
           const kickNotif = data.user.notifications.find(n => n.type === 'kick');
-          
           if (kickNotif) {
-              // Modalı aç
-              setKickedData({ 
-                  serverName: kickNotif.serverName, 
-                  kickerName: kickNotif.kickerName 
-              });
-
-              // Bildirimi sunucudan sil (Tekrar tekrar çıkmasın)
+              setKickedData({ serverName: kickNotif.serverName, kickerName: kickNotif.kickerName });
               await fetch(`${API_URL}/api/users/${userId}/notifications`, { method: 'DELETE' });
           }
       }
-
     } catch (err) { console.error(err); }
   };
 
-  // Fonksiyonlar arasına ekle
-const fetchMessages = async (channelId, beforeDate = null) => {
+  const fetchMessages = async (channelId, beforeDate = null) => {
     if (!channelId) return;
-    console.log("📨 Mesajlar isteniyor, Kanal ID:", channelId);
-
     setIsMessagesLoading(true);
     try {
         let url = `${API_URL}/api/messages/${channelId}`;
-        if (beforeDate) {
-            url += `?before=${beforeDate}`;
-        }
-
+        if (beforeDate) url += `?before=${beforeDate}`;
         const res = await fetch(url);
         const newMessages = await res.json();
 
-        if (beforeDate) {
-            // Eskileri yüklüyorsak başa ekle
-            setMessages(prev => [...newMessages, ...prev]);
-        } else {
-            // İlk defa yüklüyorsak direkt set et
-            setMessages(newMessages);
-        }
+        if (beforeDate) setMessages(prev => [...newMessages, ...prev]);
+        else setMessages(newMessages);
 
-        // Eğer 30'dan az geldiyse demek ki daha mesaj kalmadı
-        if (newMessages.length < 30) {
-            setHasMoreMessages(false);
-        } else {
-            setHasMoreMessages(true);
-        }
-
-    } catch (err) {
-        console.error("Mesaj yükleme hatası:", err);
-    } finally {
-        setIsMessagesLoading(false);
-    }
+        if (newMessages.length < 30) setHasMoreMessages(false);
+        else setHasMoreMessages(true);
+    } catch (err) { console.error(err); } 
+    finally { setIsMessagesLoading(false); }
  };
 
-  // --- HANDLERS (İŞ MANTIĞI) ---
+  // --- HANDLERS ---
 
-  // Auth (Giriş/Kayıt)
   const handleAuth = async (username, password, endpoint) => {
     try {
       const res = await fetch(`${API_URL}${endpoint}`, {
@@ -501,7 +389,6 @@ const fetchMessages = async (channelId, beforeDate = null) => {
         body: JSON.stringify({ username, password })
       });
       const data = await res.json();
-      
       if (!res.ok) throw new Error(data.message);
       
       if (endpoint === '/api/register') {
@@ -515,42 +402,158 @@ const fetchMessages = async (channelId, beforeDate = null) => {
     } catch (err) { alert(err.message); }
   };
 
+  // 👇 GİRİŞ YAPMA FONKSİYONU
+const handleLogin = async (username, password) => {
+    setIsAuthLoading(true); // Yükleniyor başlat
+    try {
+        const res = await fetch(`${API_URL}/api/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+            // ✅ BAŞARILI
+            localStorage.setItem('token', data.token);
+            localStorage.setItem('user', JSON.stringify(data.user));
+            setCurrentUser(data.user);
+            setToken(data.token);
+            
+            // Başarılı Modalı (Opsiyonel, direkt geçiş de yapabilirsin ama şık durur)
+            setFeedback({
+                isOpen: true,
+                type: 'success',
+                title: 'Giriş Başarılı!',
+                message: (
+                    <span>
+                        Tekrar hoş geldin, <span className="font-bold text-white">{data.user.nickname}</span>.
+                    </span>
+                    )
+            });
+
+        } else {
+            // ❌ HATA (Kullanıcı yok, şifre yanlış vb.)
+            setFeedback({
+                isOpen: true,
+                type: 'error',
+                title: 'Giriş Başarısız',
+                message: data.message || 'Kullanıcı adı veya şifre hatalı.'
+            });
+        }
+    } catch (error) {
+        setFeedback({
+            isOpen: true,
+            type: 'error',
+            title: 'Sunucu Hatası',
+            message: 'Sunucuya bağlanılamadı. Lütfen daha sonra tekrar dene.'
+        });
+    } finally {
+        setIsAuthLoading(false); // Yükleniyor durdur
+    }
+};
+
+// 👇 KAYIT OLMA FONKSİYONU
+const handleRegister = async (username, password) => {
+    setIsAuthLoading(true);
+    try {
+        const res = await fetch(`${API_URL}/api/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+            // ✅ BAŞARILI
+            setFeedback({
+                isOpen: true,
+                type: 'success',
+                title: 'Hesap Oluşturuldu!',
+                message: (
+                    <span>
+                        Hesabın başarıyla açıldı. Arkadaş kodun: <span className="font-bold text-white">#{data.friendCode}</span>. Şimdi giriş yapabilirsin.
+                    </span>
+                )
+            });
+            // İstersen burada otomatik olarak login ekranına geçiş yaptırabilirsin (UI state ile)
+        } else {
+            // ❌ HATA (Kullanıcı adı dolu vb.)
+            setFeedback({
+                isOpen: true,
+                type: 'warning',
+                title: 'Kayıt Yapılamadı',
+                message: data.message || 'Bu kullanıcı adı zaten alınmış.'
+            });
+        }
+    } catch (error) {
+        setFeedback({
+            isOpen: true,
+            type: 'error',
+            title: 'Bağlantı Hatası',
+            message: 'Kayıt işlemi sırasında bir sorun oluştu.'
+        });
+    } finally {
+        setIsAuthLoading(false);
+    }
+};
+
   const handleLogout = () => {
       localStorage.clear();
       window.location.reload();
   };
 
-  // Mesaj Gönderme
   const handleSendMessage = (content) => {
-    // Eğer aktif bir kanal yoksa gönderme
     if (!activeChannel) return;
-    const currentVoiceChannelId = activeVoiceChannel ? activeVoiceChannel._id : null;
     socket.emit('chat_message', { 
         username: currentUser.username, 
         content,
         channelId: activeChannel._id,
-        // 👇 Bu bilgiyi pakete ekliyoruz
-        voiceChannelId: currentVoiceChannelId 
+        voiceChannelId: activeVoiceChannel ? activeVoiceChannel._id : null 
     });
   };
 
+  // --- LIVEKIT SES HANDLERS ---
+
   // Ses kanalından ayrılma
   const handleLeaveVoice = () => {
-      if (activeVoiceChannel) {
-          // Backend'e haber ver: "Ben çıkıyorum, beni listeden sil"
-          socket.emit("leave_voice_room", activeVoiceChannel._id);
-          
-          // Local State'i temizle
-          setActiveVoiceChannel(null);
-          setVoiceParticipants([]);
-          setIsMicMuted(false);
-          setIsDeafened(false);
-      }
+        setActiveVoiceChannel(null);
+        setVoiceParticipants([]);
+    };
+
+  const handleManualDisconnect = () => {
+    console.log("👋 Kullanıcı kendi isteğiyle ayrıldı.");
+    // Önce hafızadan sil, sonra state'i temizle
+    sessionStorage.removeItem('lastVoiceChannelId');
+    handleLeaveVoice();
   };
 
-  // --- HANDLERS GÜNCELLEMELERİ ---
+  // Ses kanalına katılma
+  // App.jsx içinde
+
+const handleJoinVoice = (channel) => {
+    // 1. Eğer zaten tıkladığımız kanaldaysak hiçbir şey yapma
+    if (activeVoiceChannel && activeVoiceChannel._id === channel._id) {
+        return;
+    }
+
+    // Kanal değiştirme veya yeni girme mantığı
+    if (activeVoiceChannel) {
+        handleLeaveVoice(); // Önce eskiden çık
+        setTimeout(() => {
+            setActiveVoiceChannel(channel);
+            // 👇 YENİ: Hafızaya kaydet
+            sessionStorage.setItem('lastVoiceChannelId', channel._id);
+        }, 150);
+    } else {
+        setActiveVoiceChannel(channel);
+        // 👇 YENİ: Hafızaya kaydet
+        sessionStorage.setItem('lastVoiceChannelId', channel._id);
+    }
+};
+
+  // --- DİĞER HANDLERS ---
   
-  // Sunucu Oluşturunca
   const handleCreateServer = async (name) => {
     const res = await fetch(`${API_URL}/api/servers/create`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -559,12 +562,9 @@ const fetchMessages = async (channelId, beforeDate = null) => {
     const newServer = await res.json();
     setMyServers([...myServers, newServer]); 
     setShowCreateModal(false);
-    
-    // YENİ YÖNLENDİRME: Welcome sayfasına git
     navigate(`/servers/${newServer._id}/welcome`);
   };
 
-  // Sunucuya Katılınca -> O sunucuya git ve Hoş geldin de
   const handleJoinServer = async (serverId) => {
     try {
         const res = await fetch(`${API_URL}/api/servers/join`, {
@@ -572,58 +572,23 @@ const fetchMessages = async (channelId, beforeDate = null) => {
             body: JSON.stringify({ serverId, userId: currentUser.id })
         });
         const data = await res.json();
-
         if(res.ok) {
-            // 1. Verileri yenile (Listeye yeni sunucu gelsin)
             await fetchUserData(); 
-            
-            // 2. Katılma modalını kapat
             setShowJoinModal(false);
-
-            // 3. YÖNLENDİRME: Sunucu ID'sine git 
-            // (App.jsx'teki useEffect zaten otomatik ilk kanalı bulup oraya atacak)
             navigate(`/servers/${serverId}`);
-
-            // 4. HOŞ GELDİN MODALINI AÇ
             setWelcomeData({ serverName: data.server.name });
-
-        } else {
-            alert("Hata: " + data.message);
-        }
-    } catch (err) {
-        console.error(err);
-        alert("Sunucuya bağlanırken hata oluştu.");
-    }
+        } else { alert("Hata: " + data.message); }
+    } catch (err) { console.error(err); alert("Hata oluştu."); }
   };
 
-  const handleJoinVoice = (channel) => {
-      // Zaten aynı kanaldaysak işlem yapma
-      if (activeVoiceChannel && activeVoiceChannel._id === channel._id) return;
-      
-      // Eğer başka bir kanaldaysak önce oradan çıkış sinyali gönder!
-      if (activeVoiceChannel) {
-          socket.emit("leave_voice_room", activeVoiceChannel._id);
-      }
-      
-      // Yeni kanala geç (VoiceRoom bileşeni unmount/mount olacak ve yeni odaya join atacak)
-      setActiveVoiceChannel(channel);
-  };
-
-  // --- SUNUCU YÖNETİMİ HANDLERS ---
-  
-  // A) Sunucuyu Güncelle
   const handleUpdateServer = async (serverId, updates) => {
       const res = await fetch(`${API_URL}/api/servers/${serverId}`, {
           method: 'PUT', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({ ...updates, userId: currentUser.id })
       });
-      if(res.ok) {
-          fetchUserData(); // Verileri yenile
-          alert("Sunucu güncellendi!");
-      }
+      if(res.ok) { fetchUserData(); alert("Sunucu güncellendi!"); }
   };
 
-  // B) Rol Oluştur
   const handleCreateRole = async (serverId, name, color) => {
       const res = await fetch(`${API_URL}/api/servers/${serverId}/roles`, {
           method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -632,7 +597,6 @@ const fetchMessages = async (channelId, beforeDate = null) => {
       if(res.ok) fetchUserData();
   };
 
-  // C) Üye At
   const handleKickMember = async (serverId, memberId) => {
       const res = await fetch(`${API_URL}/api/servers/${serverId}/members/${memberId}`, {
           method: 'DELETE', headers: {'Content-Type': 'application/json'},
@@ -641,7 +605,6 @@ const fetchMessages = async (channelId, beforeDate = null) => {
       if(res.ok) fetchUserData();
   };
 
-  // D) Rol Ata
   const handleAssignRole = async (serverId, memberId, roleId) => {
       const res = await fetch(`${API_URL}/api/servers/${serverId}/members/${memberId}/roles`, {
           method: 'PUT', headers: {'Content-Type': 'application/json'},
@@ -650,10 +613,8 @@ const fetchMessages = async (channelId, beforeDate = null) => {
       if(res.ok) fetchUserData();
   };
 
-  // E) Rol Sil
   const handleDeleteRole = async (serverId, roleId) => {
-      if(!confirm("Bu rolü silmek istediğine emin misin? Üyelerden de alınacak.")) return;
-
+      if(!confirm("Emin misin?")) return;
       const res = await fetch(`${API_URL}/api/servers/${serverId}/roles/${roleId}`, {
           method: 'DELETE', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({ userId: currentUser.id })
@@ -661,29 +622,21 @@ const fetchMessages = async (channelId, beforeDate = null) => {
       if(res.ok) fetchUserData();
   };
 
-  // --- KANAL YÖNETİMİ HANDLERS ---
-
   const handleCreateChannel = async (serverId, name, type) => {
     const res = await fetch(`${API_URL}/api/channels/create`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ serverId, name, type })
     });
-    if(res.ok) {
-        fetchUserData(); // Listeyi yenilemek için en kolay yol
-    }
+    if(res.ok) fetchUserData();
   };
 
   const handleDeleteChannel = async (channelId) => {
-      // DELETE isteğinde body göndermek için headers ve body ekliyoruz
       const res = await fetch(`${API_URL}/api/channels/${channelId}`, { 
           method: 'DELETE',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ userId: currentUser.id }) // <--- ID GÖNDERİYORUZ
+          body: JSON.stringify({ userId: currentUser.id }) 
       });
-      
-      if(res.ok) {
-          fetchUserData(); 
-      }
+      if(res.ok) fetchUserData(); 
   };
 
   const handleRenameChannel = async (channelId, newName) => {
@@ -691,31 +644,59 @@ const fetchMessages = async (channelId, beforeDate = null) => {
         method: 'PUT', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ name: newName })
     });
-    
-    if(res.ok) {
-        fetchUserData(); // Listeyi yenile
-    }
+    if(res.ok) fetchUserData(); 
   };
 
   const handleCloseDeletedModal = () => {
       if (deletedChannelData) {
-          // Modal kapanınca sunucunun ana sayfasına yönlendir
           navigate(`/servers/${deletedChannelData.serverId}`);
-          setDeletedChannelData(null); // Modalı kapat ve state'i temizle
+          setDeletedChannelData(null); 
       }
   };
 
-  // Arkadaşlık İşlemleri
   const handleSendFriendRequest = async () => {
     const parts = friendInput.split('#');
-    if(parts.length !== 2) { alert("Format şöyle olmalı: Nickname#1234"); return; }
-    
+    if(parts.length !== 2) { alert("Format: Nickname#1234"); return; }
     const res = await fetch(`${API_URL}/api/friends/request`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ senderId: currentUser.id, targetUsername: parts[0], targetCode: parts[1] })
     });
     const data = await res.json();
-    alert(data.message);
+    if (res.ok) {
+        // ✅ BAŞARILI DURUMU
+        setFeedback({
+            isOpen: true,
+            type: 'success',
+            title: 'İstek Gönderildi!',
+            message: (
+                <span>
+                    <span className="font-bold text-white">{friendInput}</span> kullanıcısına arkadaşlık isteği başarıyla iletildi.
+                </span>
+            )
+        });
+        setFriendInput(''); // Inputu temizle
+    } else {
+        // ❌ API'DEN GELEN HATALAR
+        let errorTitle = 'Hata Oluştu';
+        let errorType = 'error';
+
+        // Backend mesajına göre özelleştirme
+        if (data.message.includes('not found')) {
+            errorTitle = 'Kullanıcı Bulunamadı 🔍';
+        } else if (data.message.includes('already')) {
+            errorTitle = 'Zaten Arkadaşsınız 🤝';
+            errorType = 'warning';
+        } else if (data.message.includes('self')) {
+            errorTitle = 'Kendini Ekleyemezsin. Başka Birini Dene 😅';
+        }
+
+        setFeedback({
+            isOpen: true,
+            type: errorType,
+            title: errorTitle,
+            message: data.message || 'Bir şeyler ters gitti.'
+        });
+    }
     setFriendInput('');
  };
 
@@ -730,42 +711,97 @@ const fetchMessages = async (channelId, beforeDate = null) => {
  const handleUpdateUser = async (updates) => {
     try {
         const res = await fetch(`${API_URL}/api/users/${currentUser.id}`, {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
+            method: 'PUT', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(updates)
         });
         const data = await res.json();
-
         if(!res.ok) throw new Error(data.message);
 
-        // State'i ve LocalStorage'ı güncelle
         const updatedUser = { ...currentUser, ...data, id: data._id };
         setCurrentUser(updatedUser);
         localStorage.setItem('user', JSON.stringify(updatedUser));
-        
-        // alert("Profil güncellendi!"); // <--- BU SATIRI SİLDİK
-        
-        setShowSettingsModal(false); // Modalı sessizce kapatıyoruz
-        
-    } catch (err) {
-        console.error(err); // Hata olursa konsola yazsın, kullanıcıyı boğmayalım
-        alert("Bir hata oluştu: " + err.message); // Sadece hata varsa uyarabiliriz
-    }
+        setShowSettingsModal(false); 
+    } catch (err) { alert(err.message); }
   };
+
+  // 👇 Mikrofon Aç/Kapa Mantığı
+const toggleMic = () => {
+    // Eğer sağırlaştırılmışsak mikrofonu açamayız
+    if (isDeafened) return; 
+    setIsMicMuted(!isMicMuted);
+};
+
+// 👇 Sağırlaştır Aç/Kapa Mantığı
+const toggleDeafen = () => {
+    const newDeafenState = !isDeafened;
+    setIsDeafened(newDeafenState);
+
+    // Eğer sağırlaştırıldıysa, mikrofonu da zorla kapat
+    if (newDeafenState) {
+        setIsMicMuted(true);
+    }
+    // Not: Sağırlaştırma kapanınca mikrofon kapalı kalsın (Discord mantığı)
+};
+
+// App.jsx içi
+
+// 🔍 Ses kanalının hangi sunucuda olduğunu bulan yardımcı fonksiyon
+const getVoiceConnectionDetails = () => {
+    if (!activeVoiceChannel || !myServers) return { serverName: "Bilinmeyen Sunucu" };
+
+    // Tüm sunucuları tara, kanalı içeren sunucuyu bul
+    const ownerServer = myServers.find(server => 
+        server.channels && server.channels.some(c => c._id === activeVoiceChannel._id)
+    );
+
+    return {
+        serverName: ownerServer ? ownerServer.name : "Sunucu Bulunamadı"
+    };
+};
+
+const userPanelContent = (
+    <UserProfile 
+        currentUser={currentUser}
+        onOpenSettings={() => setShowSettingsModal(true)} 
+        isMicMuted={isMicMuted}
+        toggleMic={toggleMic}
+        isDeafened={isDeafened}
+        toggleDeafen={toggleDeafen}
+    />
+);
+
+const voicePanelContent = activeVoiceChannel ? (
+    <VoiceConnectionPanel 
+        channelName={activeVoiceChannel.name}
+        onDisconnect={handleManualDisconnect}
+        // DİKKAT: activeServer her zaman dolu olmayabilir (Ana sayfadaysak null'dır).
+        // Bu yüzden helper fonksiyonu kullanıyoruz:
+        serverName={getVoiceConnectionDetails().serverName}
+    />
+) : null;
 
   // --- RENDER ---
 
-  // 1. GİRİŞ EKRANI
   if (!token) {
     return (
-      <AuthForm 
-        onLogin={(u, p) => handleAuth(u, p, '/api/login')}
-        onRegister={(u, p) => handleAuth(u, p, '/api/register')}
-      />
+      <>
+        <AuthForm 
+            onLogin={handleLogin} 
+            onRegister={handleRegister} 
+            isLoading={isAuthLoading} // Loading prop'unu gönderdik
+        />
+        {/* Auth ekranındayken de modalın çalışması için buraya ekliyoruz */}
+        <FeedbackModal 
+            isOpen={feedback.isOpen}
+            onClose={() => setFeedback(prev => ({ ...prev, isOpen: false }))}
+            type={feedback.type}
+            title={feedback.title}
+            message={feedback.message}
+        />
+      </>
     );
   }
 
-  // 2. ANA UYGULAMA
   return (
     <div className="flex h-screen font-sans text-gray-100 overflow-hidden bg-[#313338]">
       
@@ -783,53 +819,60 @@ const fetchMessages = async (channelId, beforeDate = null) => {
         {activeServer ? (
             // === SERVER GÖRÜNÜMÜ ===
             <>
-                {/* Orta Sol: Kanal Listesi + Profil */}
-                <ChannelList 
-                    serverName={activeServer.name}
-                    channels={activeServer.channels || []} // Kanalları gönderiyoruz
-                    currentUser={currentUser}
-                    handleLogout={handleLogout}
-                    
-                    // Yeni Yetenekler:
-                    onCreateChannel={handleCreateChannel}
-                    onDeleteChannel={handleDeleteChannel}
-                    onRenameChannel={handleRenameChannel}
-                    activeChannelId={activeChannel?._id}
-                    activeBot={activeBot}
-                    serverId={activeServer._id}
-                    onOpenSettings={() => setShowSettingsModal(true)}
-                    onOpenServerSettings={() => setShowServerSettings(true)}
-                    onJoinVoice={handleJoinVoice}
-                    activeVoiceChannel={activeVoiceChannel} // <--- Hangi kanalda olduğumuzu bilmeli
-                    voiceParticipants={voiceParticipants}   // <--- Kimler var?
-                    VoiceComponent={
-                        activeVoiceChannel ? (
-                            <VoiceRoom 
-                                serverId={activeServer._id}
-                                channelId={activeVoiceChannel._id}
-                                socket={socket}
-                                currentUser={currentUser}
-                                setVoiceParticipants={setVoiceParticipants}
-                                isMicMuted={isMicMuted}
-                                isDeafened={isDeafened}
-                            />
-                        ) : null
-                    }
-                    allVoiceStates={allVoiceStates}
-                    onLeaveVoice={handleLeaveVoice}
-                    isMicMuted={isMicMuted}
-                    toggleMic={() => setIsMicMuted(!isMicMuted)}
-                    isDeafened={isDeafened}
-                    toggleDeafen={() => setIsDeafened(!isDeafened)}
-                    onOpenCreateChannel={openCreateModal}
-                />
-                
-                {/* ORTA ALAN: WELCOME SAYFASI veya CHAT ALANI */}
-                {location.pathname.includes('/welcome') ? (
-                    <ServerWelcome 
-                        server={activeServer}
+                <div className="w-60 bg-[#121214] flex flex-col flex-shrink-0 relative h-full">
+                    {/* 1. SUNUCU BAŞLIĞI */}
+                    <div className="h-12 flex items-center justify-between px-4 font-bold shadow-sm text-white hover:bg-[#35373c] cursor-pointer transition border-b border-[#1f2023] group flex-shrink-0">
+                        <span className="truncate">{activeServer.name}</span>
+                        <FaCog 
+                            className="text-gray-400 hover:text-white transition cursor-pointer" 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setShowServerSettings(true);
+                            }}
+                            title="Sunucu Ayarları"
+                        />
+                    </div>
+                    {
+                    /* Orta Sol: Kanal Listesi + Profil */}
+                    <ChannelList 
+                        serverName={activeServer.name}
+                        channels={activeServer.channels || []} 
+                        currentUser={currentUser}
+                        handleLogout={handleLogout}
+                        isMicMuted={isMicMuted}
+                        toggleMic={toggleMic}
+                        isDeafened={isDeafened}
+                        toggleDeafen={toggleDeafen}
+                        onCreateChannel={handleCreateChannel}
+                        onDeleteChannel={handleDeleteChannel}
+                        onRenameChannel={handleRenameChannel}
+                        activeChannelId={activeChannel?._id}
+                        serverId={activeServer._id}
+                        onOpenSettings={() => setShowSettingsModal(true)}
+                        onOpenServerSettings={() => setShowServerSettings(true)}
+                        voiceParticipants={voiceParticipants}
+                        
+                        // LiveKit Ses Mantığı 👇
+                        onJoinVoice={handleJoinVoice}
+                        activeVoiceChannel={activeVoiceChannel} 
+                        onLeaveVoice={handleManualDisconnect}
+                        allVoiceStates={allVoiceStates}
+                        
+                        
+                        
                         onOpenCreateChannel={openCreateModal}
                     />
+                    {/* 4. YEŞİL SES PANELİ (Bağlantı Kurulunca Çıkar) */}
+                    {activeVoiceChannel && (
+                        voicePanelContent
+                    )}
+                    {/* 5. KULLANICI PROFİLİ */}
+                    {userPanelContent}
+                </div>
+                
+                
+                {location.pathname.includes('/welcome') ? (
+                    <ServerWelcome server={activeServer} onOpenCreateChannel={openCreateModal} />
                 ) : (
                     <ChatArea 
                         messages={messages} 
@@ -843,7 +886,6 @@ const fetchMessages = async (channelId, beforeDate = null) => {
                     />
                 )}
 
-                {/* SAĞ: SUNUCU ÜYELERİ (YENİ EKLENDİ) */}
                 <UserList 
                     users={activeServer.members || []} 
                     roles={activeServer.roles || []}
@@ -859,24 +901,38 @@ const fetchMessages = async (channelId, beforeDate = null) => {
                 incomingRequests={incomingRequests}
                 friends={friends}
                 currentUser={currentUser}
+                userPanelContent={userPanelContent}
                 handleLogout={handleLogout}
                 onOpenSettings={() => setShowSettingsModal(true)}
                 friendInput={friendInput}
                 setFriendInput={setFriendInput}
+                voicePanelContent={voicePanelContent}
                 handleSendFriendRequest={handleSendFriendRequest}
                 handleAcceptFriend={handleAcceptFriend}
                 socket={socket}
                 onSendMessage={(content, channelId) => {
-                    socket.emit('chat_message', { 
-                        username: currentUser.username, 
-                        content,
-                        channelId: channelId 
-                    });
+                    socket.emit('chat_message', { username: currentUser.username, content, channelId });
                 }}
                 messages={messages}
                 fetchMessages={fetchMessages}
             />
         )}
+      </div>
+
+      {/* 🔥 3. GLOBAL SES YÖNETİCİSİ (Hepsinden Bağımsız) 🔥 */}
+      {/* Bu bileşen, sen sunucu değiştirsen de Chat'e girsen de SABİT kalır. */}
+      <div className="hidden"> 
+            {activeVoiceChannel && (
+                <VoiceChannel 
+                    channelId={activeVoiceChannel._id}
+                    channelName={activeVoiceChannel.name}
+                    user={currentUser}
+                    onLeave={handleLeaveVoice} // F5 durumunda state temizler
+                    setVoiceParticipants={setVoiceParticipants}
+                    isMicMuted={isMicMuted}
+                    isDeafened={isDeafened}
+                />
+            )}
       </div>
 
       {/* MODALLAR */}
@@ -890,20 +946,8 @@ const fetchMessages = async (channelId, beforeDate = null) => {
             onLogout={handleLogout}
         />
       )}
-      {/* KANAL SİLİNDİ MODALI */}
-      {deletedChannelData && (
-        <ChannelDeletedModal 
-            data={deletedChannelData}
-            onClose={handleCloseDeletedModal}
-        />
-      )}
-      {/* HOŞ GELDİN MODALI */}
-      {welcomeData && (
-        <WelcomeModal 
-            serverName={welcomeData.serverName}
-            onClose={() => setWelcomeData(null)}
-        />
-      )}
+      {deletedChannelData && <ChannelDeletedModal data={deletedChannelData} onClose={handleCloseDeletedModal} />}
+      {welcomeData && <WelcomeModal serverName={welcomeData.serverName} onClose={() => setWelcomeData(null)} />}
       {createModal.isOpen && (
            <CreateChannelModal 
                initialType={createModal.type} 
@@ -923,15 +967,15 @@ const fetchMessages = async (channelId, beforeDate = null) => {
               onDeleteRole={handleDeleteRole}
           />
       )}
-      {/* ATILMA MODALI */}
-      {kickedData && (
-        <KickedModal 
-            data={kickedData}
-            onClose={() => setKickedData(null)}
+      {kickedData && <KickedModal data={kickedData} onClose={() => setKickedData(null)} />}
+       <FeedbackModal 
+            isOpen={feedback.isOpen}
+            onClose={closeFeedback}
+            type={feedback.type}
+            title={feedback.title}
+            message={feedback.message}
         />
-      )}
     </div>
-    
   );
 }
 

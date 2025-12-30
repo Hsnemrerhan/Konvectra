@@ -1,0 +1,15 @@
+# Hassas Dosyalar
+.env
+.DS_Store
+
+# Bağımlılıklar (Bunlar sunucuda tekrar kurulur, yüklenmez)
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+
+# Build Dosyaları
+frontend/dist/
+frontend/build/
+
+# Docker verileri (Local veritabanı dosyaları gitmemeli)
+mongo_data/

@@ -125,7 +125,7 @@ const UserList = ({ users, roles = [], ownerId, type = "server" }) => {
           {/* Avatar */}
           <div className="w-8 h-8 rounded-full bg-gray-600 relative flex-shrink-0">
             <AnimatedAvatar 
-                src={user.avatar || "https://i.pravatar.cc/150"} 
+                src={user.avatar} 
                 alt={user.nickname}
                 className={`w-full h-full rounded-full object-cover ${isOffline ? 'grayscale' : ''}`} // className'i buraya veriyoruz
             />
@@ -147,9 +147,7 @@ const UserList = ({ users, roles = [], ownerId, type = "server" }) => {
             </div>
             
             <div className="text-xs text-gray-400 truncate">
-                {type === 'home' && !isOffline
-                    ? 'Oynuyor: VS Code' 
-                    : (user.status === 'online' ? 'Çevrimiçi' : user.status === 'dnd' ? 'Rahatsız Etmeyin' : user.status === 'idle' ? 'Boşta' : user.status === 'offline' ? 'Çevrimdışı' : '')
+                {user.status === 'online' ? 'Çevrimiçi' : user.status === 'dnd' ? 'Rahatsız Etmeyin' : user.status === 'idle' ? 'Boşta' : user.status === 'offline' ? 'Çevrimdışı' : ''
                 }
             </div>
           </div>

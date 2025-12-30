@@ -10,8 +10,10 @@ const HomeSidebar = ({
   friends = [], 
   onSelectFriend, 
   activeFriendId, 
+  userPanelContent,
   handleLogout,
-  onOpenSettings
+  onOpenSettings,
+  voicePanelContent
 }) => {
   return (
     <div className="w-60 bg-[#121214] flex flex-col flex-shrink-0">
@@ -94,11 +96,9 @@ const HomeSidebar = ({
 
       </div>
 
-      <UserProfile 
-        currentUser={currentUser} 
-        onLogout={handleLogout} 
-        onOpenSettings={onOpenSettings}
-     />
+      {voicePanelContent}
+
+      {userPanelContent}
       
     </div>
   );

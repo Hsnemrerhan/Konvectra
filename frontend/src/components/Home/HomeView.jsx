@@ -14,17 +14,21 @@ const HomeView = ({
     socket,
     onSendMessage,
     messages,
-    fetchMessages
+    fetchMessages,
+    userPanelContent,
+    voicePanelContent
 }) => {
   
-  // DM ve Sesli Arama State'leri
-  const [selectedFriend, setSelectedFriend] = useState(null);
-  const [dmRoomId, setDmRoomId] = useState(null);
-  const [isCallActive, setIsCallActive] = useState(false);
-  const [callConnectionStatus, setCallConnectionStatus] = useState('disconnected');
-  const [voiceParticipants, setVoiceParticipants] = useState([]);
-  const [isMicMuted, setIsMicMuted] = useState(false);
-  const [isDeafened, setIsDeafened] = useState(false);
+// DM ve Sesli Arama State'leri
+const [selectedFriend, setSelectedFriend] = useState(null);
+const [dmRoomId, setDmRoomId] = useState(null);
+const [isCallActive, setIsCallActive] = useState(false);
+const [callConnectionStatus, setCallConnectionStatus] = useState('disconnected');
+const [voiceParticipants, setVoiceParticipants] = useState([]);
+const [isMicMuted, setIsMicMuted] = useState(false);
+const [isDeafened, setIsDeafened] = useState(false);
+
+
 
   // 1. ARKADAŞ SEÇİLİNCE (DM BAŞLAT)
   const handleSelectFriend = async (friend) => {
@@ -105,6 +109,8 @@ const HomeView = ({
             friends={friends}
             onSelectFriend={handleSelectFriend}
             activeFriendId={selectedFriend?._id}
+            userPanelContent={userPanelContent}
+            voicePanelContent={voicePanelContent}
         />
 
         {/* ORTA ALAN */}
