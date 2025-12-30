@@ -66,7 +66,12 @@ const UserSettingsModal = ({ currentUser, onClose, onUpdate, onLogout }) => {
         formData.append('avatar', croppedBlob, 'avatar.jpg');
 
         try {
-            const API_URL = `http://${window.location.hostname}:5000`;
+            const isLocal = window.location.hostname === 'localhost';
+            
+            const API_URL = isLocal 
+                ? 'http://localhost:5000'       // Geliştirme ortamı
+                : 'https://konvectra.com';      // Canlı ortam (Nginx /api'yi zaten yönlendiriyor)
+
             const res = await fetch(`${API_URL}/api/users/${currentUser.id}/avatar`, {
                 method: 'POST',
                 body: formData
