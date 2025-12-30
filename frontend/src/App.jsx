@@ -591,7 +591,7 @@ const handleJoinVoice = (channel) => {
           method: 'PUT', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({ ...updates, userId: currentUser.id })
       });
-      if(res.ok) { fetchUserData(); alert("Sunucu güncellendi!"); }
+      if(res.ok) { fetchUserData();}
   };
 
   const handleCreateRole = async (serverId, name, color) => {
