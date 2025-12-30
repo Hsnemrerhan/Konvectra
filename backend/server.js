@@ -24,12 +24,7 @@ const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET;
 const webhookReceiver = new WebhookReceiver(LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
 
 const app = express();
-app.use(express.json({
-  verify: (req, res, buf) => {
-    req.rawBody = buf.toString(); // Gelen ham veriyi sakla
-  },
-  type: '*/*'
-}));
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
 
