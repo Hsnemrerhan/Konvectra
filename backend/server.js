@@ -127,7 +127,7 @@ async function getUserStatus(userId) {
 const UserSchema = new mongoose.Schema({
   username: { type: String, unique: true, required: true },
   nickname: { type: String },
-  friendCode: { type: String, required: true },
+  friendCode: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   avatar: { type: String },
   status: { type: String, default: 'offline' }, 
@@ -142,7 +142,6 @@ const UserSchema = new mongoose.Schema({
   }],
   lastRead: { type: Map, of: String, default: {} }
 }, { timestamps: true });
-UserSchema.index({ username: 1, friendCode: 1 }, { unique: true });
 const User = mongoose.model('User', UserSchema);
 
 const RoleSchema = new mongoose.Schema({
@@ -198,8 +197,14 @@ const BotSchema = new mongoose.Schema({
 });
 const Bot = mongoose.model('Bot', BotSchema);
 
-function generateFriendCode() {
-  return Math.floor(1000 + Math.random() * 9000).toString();
+function generateFriendCode(length = 7) {
+    // 0, O, I, 1 gibi kafa karıştıranları çıkardım.
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; 
+    let result = '';
+    for (let i = 0; i < length; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
 }
 
 // --- YARDIMCI FONKSİYON: DOSYAYI BULUTA YÜKLE VE SİL ---
@@ -283,8 +288,26 @@ app.post('/api/register', async (req, res) => {
     const existingUser = await User.findOne({ username });
     if (existingUser) return res.status(400).json({ message: 'Bu kullanıcı adı dolu!' });
 
+    // 2. Benzersiz Friend Code Üretme Döngüsü
+    let friendCode;
+    let isUnique = false;
+
+    // Eşsiz bir kod bulana kadar dön (Genelde ilk seferde bulur)
+    while (!isUnique) {
+        friendCode = generateFriendCode(); // 6 haneli kod üret
+        
+        // Veritabanında bu koda sahip BAŞKA biri var mı diye bak
+        // NOT: Eğer sadece "Username + FriendCode" benzersiz olsun istersen sorguyu değiştirmen gerekir.
+        // Ama 6 haneli sistemde kodu "Global Benzersiz" (TC Kimlik gibi) yapmak daha sağlıklıdır.
+        // Böylece arkadaş ararken sadece kodu girmeleri yeterli olur.
+        const checkCode = await User.findOne({ friendCode });
+        
+        if (!checkCode) {
+            isUnique = true; // Kimse kullanmıyor, döngüden çık
+        }
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
-    const friendCode = generateFriendCode();
 
     // 👇 YENİ KISIM: İSİM LİSTESİNDEN SEÇİM
     const avatarNames = ['nova', 'silas', 'arlo', 'maya', 'felix', 'jasper', 'luna'];
@@ -996,9 +1019,9 @@ app.get('/api/messages/:channelId', async (req, res) => {
 });
 
 app.post('/api/friends/request', async (req, res) => {
-  const { senderId, targetUsername, targetCode } = req.body;
+  const { senderId, targetCode } = req.body;
   try {
-    const targetUser = await User.findOne({ nickname: targetUsername, friendCode: targetCode });
+    const targetUser = await User.findOne({ friendCode: targetCode });
     const senderUser = await User.findById(senderId);
     if (!targetUser) return res.status(404).json({ message: "Kullanıcı bulunamadı!" });
     if (targetUser._id.toString() === senderId) return res.status(400).json({ message: "Kendine istek atamazsın!" });
@@ -1016,7 +1039,7 @@ app.post('/api/friends/request', async (req, res) => {
         avatar: senderUser.avatar,
         friendCode: senderUser.friendCode
     });
-    res.json({ message: `Başarılı! ${targetUsername} kullanıcısına istek gönderildi.` });
+    res.json({ message: `Başarılı! ${targetUser.nickname} kullanıcısına istek gönderildi.`, nickname: targetUser.nickname});
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

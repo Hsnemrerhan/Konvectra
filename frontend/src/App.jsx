@@ -354,10 +354,29 @@ useEffect(() => {
 
   const fetchUserData = async () => {
     try {
-      const userId = currentUser.id || currentUser._id;
+      const storedUser = JSON.parse(localStorage.getItem('user'));
+      const userId = storedUser?.id || storedUser?._id;
       if (!userId) return;
 
       const res = await fetch(`${API_URL}/api/users/me?userId=${userId}`);
+
+      // Eğer sunucu "404 (Bulunamadı)" veya "401 (Yetkisiz)" derse:
+      if (res.status === 404 || res.status === 401) {
+          console.warn("⚠️ Kullanıcı veritabanında bulunamadı. Oturum kapatılıyor...");
+          
+          // Temizlik yap
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          localStorage.removeItem('lastServer'); // Varsa bunu da sil
+          
+          setCurrentUser(null);
+          
+          // Sayfayı zorla yenileyerek ana sayfaya (Login'e) at
+          window.location.href = '/'; 
+          return;
+      }
+      // Diğer hatalar için kontrol
+      if (!res.ok) throw new Error('Veri çekme hatası');
       const data = await res.json();
       
       setMyServers(data.servers);
@@ -667,11 +686,9 @@ const handleJoinVoice = (channel) => {
   };
 
   const handleSendFriendRequest = async () => {
-    const parts = friendInput.split('#');
-    if(parts.length !== 2) { alert("Format: Nickname#1234"); return; }
     const res = await fetch(`${API_URL}/api/friends/request`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ senderId: currentUser.id, targetUsername: parts[0], targetCode: parts[1] })
+        body: JSON.stringify({ senderId: currentUser.id, targetCode: friendInput })
     });
     const data = await res.json();
     if (res.ok) {
@@ -682,7 +699,7 @@ const handleJoinVoice = (channel) => {
             title: 'İstek Gönderildi!',
             message: (
                 <span>
-                    <span className="font-bold text-white">{friendInput}</span> kullanıcısına arkadaşlık isteği başarıyla iletildi.
+                    <span className="font-bold text-white">{data.nickname}</span> kullanıcısına arkadaşlık isteği başarıyla iletildi.
                 </span>
             )
         });

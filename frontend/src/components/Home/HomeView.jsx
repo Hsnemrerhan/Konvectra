@@ -184,17 +184,32 @@ const [isDeafened, setIsDeafened] = useState(false);
                     {/* Sekme: Arkadaş Ekle */}
                     {activeTab === 'add' && (
                         <div>
-                            <h2 className="uppercase font-bold text-white mb-2">Arkadaş Ekle</h2>
-                            <div className="text-xs text-gray-400 mb-4">Görünen adı ve kodunu girerek arkadaş ekleyebilirsin.</div>
-                            <div className="flex bg-[#1e1f22] p-2 rounded-lg border border-black focus-within:border-blue-500">
-                                <input 
-                                    value={friendInput} 
-                                    onChange={e=>setFriendInput(e.target.value)}
-                                    placeholder="Nickname#0000" 
-                                    className="bg-transparent outline-none flex-1 text-white placeholder-gray-500"
-                                />
-                                <button onClick={handleSendFriendRequest} className="bg-[#5865F2] px-4 py-1 rounded text-sm font-bold disabled:opacity-50 text-white hover:bg-[#4752c4] transition">İstek Gönder</button>
-                            </div>
+                            <h2 className="uppercase font-bold text-[20px] text-white mb-2">Arkadaş Ekle</h2>
+                            <div className="text-[15px] text-gray-400 mb-4">Arkadaşının kodunu girerek onu ekleyebilirsin.</div>
+                            <div className="flex items-center bg-[#1e1f22] p-2 rounded-lg border border-black focus-within:border-blue-500 transition-colors">
+    
+                            {/* SABİT HASH İŞARETİ */}
+                            <span className="text-gray-400 font-bold text-lg px-2 select-none">#</span>
+
+                            {/* INPUT */}
+                            <input 
+                                value={friendInput} 
+                                onChange={e => setFriendInput(e.target.value.toUpperCase().trim())} // Otomatik büyük harf ve boşluk temizleme
+                                maxLength={7} // Kod uzunluğu limiti
+                                placeholder="ARKADAŞ KODU" 
+                                className="bg-transparent outline-none flex-1 text-white placeholder-gray-500 font-mono tracking-wider uppercase"
+                            />
+
+                            {/* BUTON (Aynı kalıyor) */}
+                            <button 
+                                onClick={handleSendFriendRequest} 
+                                disabled={!friendInput || friendInput.length < 7} // Kod eksikse buton pasif olsun
+                                className="bg-[#5865F2] px-4 py-1 rounded text-sm font-bold disabled:cursor-not-allowed text-white hover:bg-[#4752c4] transition ml-2"
+                            >
+                                İstek Gönder
+                            </button>
+
+                        </div>
                         </div>
                     )}
 
