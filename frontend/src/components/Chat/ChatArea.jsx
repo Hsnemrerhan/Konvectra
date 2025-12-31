@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { IoMdSend } from 'react-icons/io';
-import { FaHashtag, FaPlus, FaSpinner, FaPen, FaTrash } from 'react-icons/fa';
+import { FaHashtag, FaPlus, FaSpinner, FaPen, FaTrash, FaFileAlt, FaTimes, FaPlay, FaDownload } from 'react-icons/fa';
 import AnimatedAvatar from './AnimatedAvatar';
 import AnimatedNickname from './AnimatedNickname';
 
 const ChatArea = ({ 
   messages, 
   currentUser, 
-  onSendMessage, 
+  onSendMessage, // Not: Artık bu fonksiyonu nesne olarak çağıracağız {content, attachmentUrl, attachmentType}
   activeChannelName = "genel-sohbet", 
   activeChannelId,
   onLoadMore,
@@ -17,82 +17,136 @@ const ChatArea = ({
   isLoading
 }) => {
   const [input, setInput] = useState('');
-  
-  // Son okunan mesajın ID'sini tutuyoruz (Kırmızı çizgi için)
   const [lastReadMessageId, setLastReadMessageId] = useState(null);
   
+  // --- DOSYA YÜKLEME STATE'LERİ ---
+  const [selectedFile, setSelectedFile] = useState(null); // Seçilen dosya objesi
+  const [previewUrl, setPreviewUrl] = useState(null);     // Önizleme URL'i (Blob)
+  const [isUploading, setIsUploading] = useState(false);  // Yükleniyor mu?
+  const [fileType, setFileType] = useState(null);         // 'image', 'video', 'file'
+
   const messagesEndRef = useRef(null);
   const scrollContainerRef = useRef(null);
   const prevScrollHeightRef = useRef(0);
   const isAtBottomRef = useRef(true);
+  const fileInputRef = useRef(null); // Gizli input referansı
 
-  // --- 1. STATE VE SCROLL AYARLARI ---
-  
+  // --- API URL (Local vs Prod) ---
+  const isProduction = window.location.hostname !== 'localhost';
+  const API_URL = isProduction ? "https://konvectra.com" : "http://localhost:5000";
+
+  // --- SCROLL AYARLARI ---
   useEffect(() => {
      messagesEndRef.current?.scrollIntoView();
      isAtBottomRef.current = true;
   }, [activeChannelId]);
 
-  // Kanal değişince veya kullanıcı bilgisi güncellenince "Son Okunanı" ayarla
   useEffect(() => {
      if (currentUser && currentUser.lastRead && activeChannelId) {
          setLastReadMessageId(currentUser.lastRead[activeChannelId] || null);
      }
   }, [activeChannelId, currentUser]);
 
-  // --- 2. SCROLL POZİSYON MANTIĞI ---
   useLayoutEffect(() => {
       if (!scrollContainerRef.current) return;
-
-      // A) Pagination Yüklemesi (Eski mesajlar gelince zıplamayı önle)
       if (prevScrollHeightRef.current > 0) {
           const newScrollHeight = scrollContainerRef.current.scrollHeight;
           const heightDifference = newScrollHeight - prevScrollHeightRef.current;
           if (heightDifference > 0) scrollContainerRef.current.scrollTop = heightDifference;
           prevScrollHeightRef.current = 0;
-      } 
-      // B) Yeni Mesaj veya İlk Yükleme
-      else {
+      } else {
           const lastMsg = messages[messages.length - 1];
           const senderId = typeof lastMsg?.sender === 'object' ? lastMsg.sender._id : lastMsg?.sender;
           const isMyMessage = senderId === currentUser.id;
-
-          // Eğer mesajı ben attıysam VEYA zaten en alttaysam -> Aşağı Kaydır
           if (isMyMessage || isAtBottomRef.current) {
               messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
           }
       }
   }, [messages, currentUser.id]);
 
-  // --- 3. SCROLL EVENT (OKUNDU BİLGİSİ GÖNDERME) ---
+  // --- DOSYA SEÇME İŞLEMİ ---
+  const handleFileSelect = (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+        const file = e.target.files[0];
+        setSelectedFile(file);
+
+        // Türü belirle
+        if (file.type.startsWith('image/')) setFileType('image');
+        else if (file.type.startsWith('video/')) setFileType('video');
+        else setFileType('file');
+
+        // Önizleme oluştur
+        const objectUrl = URL.createObjectURL(file);
+        setPreviewUrl(objectUrl);
+    }
+  };
+
+  const cancelUpload = () => {
+    setSelectedFile(null);
+    setPreviewUrl(null);
+    setFileType(null);
+    if(fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // --- MESAJ GÖNDERME (NORMAL + DOSYALI) ---
+  const handleSubmit = async (e) => {
+    e?.preventDefault();
+    if (!input.trim() && !selectedFile) return;
+
+    // 1. EĞER DOSYA VARSA ÖNCE YÜKLE
+    if (selectedFile) {
+        setIsUploading(true);
+        const formData = new FormData();
+        formData.append('attachment', selectedFile);
+
+        try {
+            const res = await fetch(`${API_URL}/api/chat/upload`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!res.ok) throw new Error("Yükleme başarısız");
+            const data = await res.json();
+
+            // Dosya yüklendi, şimdi mesajı socket ile gönder
+            onSendMessage({
+                content: input, // Dosya ile birlikte yazı da olabilir
+                attachmentUrl: data.url,
+                attachmentType: data.type
+            });
+
+            // Temizlik
+            cancelUpload();
+            setInput('');
+        } catch (error) {
+            console.error(error);
+            alert("Dosya yüklenemedi!");
+        } finally {
+            setIsUploading(false);
+        }
+    } 
+    // 2. SADECE YAZI VARSA
+    else {
+        onSendMessage({ content: input });
+        setInput('');
+    }
+  };
+
+  // --- SCROLL EVENT ---
   const handleScroll = (e) => {
     const { scrollTop, scrollHeight, clientHeight } = e.target;
-    
-    // Pagination tetikleyici
     if (scrollTop === 0 && hasMore && !isLoading) {
         prevScrollHeightRef.current = scrollHeight;
         onLoadMore();
     }
-
-    // En altta mıyız kontrolü
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-    const isBottom = distanceFromBottom < 50;
-    isAtBottomRef.current = isBottom;
+    isAtBottomRef.current = distanceFromBottom < 50;
 
-    // YENİ: Eğer en alttaysak ve son mesajı henüz "okundu" işaretlemediysek işaretle
-    if (isBottom && messages.length > 0) {
+    if (isAtBottomRef.current && messages.length > 0) {
         const lastMsg = messages[messages.length - 1];
-        
-        // Veritabanındaki son okuduğum ID, şu anki son mesajdan farklıysa güncelle
         if (lastMsg._id !== lastReadMessageId) {
-             setLastReadMessageId(lastMsg._id); // State güncelle (çizgiyi kaldır)
-             
-             // Backend'e haber ver (API URL'in App.jsx'ten gelmesi veya global olması lazım, burada varsayıyoruz)
-             // Not: API_URL değişkeni App.jsx scope'unda olabilir, buraya prop olarak geçmek veya global tanımlamak gerekir.
-             // Şimdilik window.location üzerinden dinamik alıyoruz:
-             const API_BASE = `http://${window.location.hostname}:5000`; 
-             
-             fetch(`${API_BASE}/api/channels/${activeChannelId}/ack`, {
+             setLastReadMessageId(lastMsg._id);
+             fetch(`${API_URL}/api/channels/${activeChannelId}/ack`, {
                  method: 'POST',
                  headers: {'Content-Type': 'application/json'},
                  body: JSON.stringify({ userId: currentUser.id, messageId: lastMsg._id })
@@ -101,21 +155,9 @@ const ChatArea = ({
     }
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (input.trim()) {
-      onSendMessage(input);
-      setInput('');
-    }
-  };
-
-  // --- YARDIMCI FORMATLAYICILAR ---
   const formatDateTime = (dateString) => {
       const date = new Date(dateString);
-      return date.toLocaleString('tr-TR', {
-          day: '2-digit', month: '2-digit', year: 'numeric',
-          hour: '2-digit', minute: '2-digit'
-      });
+      return date.toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
   const formatTimeOnly = (dateString) => {
@@ -123,246 +165,267 @@ const ChatArea = ({
       return date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
   };
 
-  // Filtreleme (Sadece aktif kanal)
   const displayMessages = messages.filter(m => {
       if (!m.channelId) return true;
       return m.channelId === activeChannelId;
   });
 
+  // URL'den dosya ismini çıkaran fonksiyon
+  const getFileNameFromUrl = (url) => {
+    if (!url) return "Dosya";
+    try {
+      // URL'in sonundaki parçayı al (örn: 1723123-odev.pdf)
+      const fileName = decodeURIComponent(url.split('/').pop());
+      // İstersen baştaki timestamp'i temizlemek için regex kullanabilirsin ama şimdilik olduğu gibi gösterelim
+      return fileName;
+    } catch (e) {
+      return "Dosya";
+    }
+  };
+
+  // Dosya uzantısını bulan fonksiyon (örn: PDF, ZIP)
+  const getFileExtension = (url) => {
+    if (!url) return "DOSYA";
+    return url.split('.').pop().toUpperCase() + " DOSYASI";
+  };
+
   return (
-    <div className="flex-1 bg-[#1A1A1E] flex flex-col min-w-0 h-full">
-      {/* chatType bir boolean veya kontrol edilebilir bir değer olmalı */}
-      {chatType ? (
-        
-        // --- 1. DURUM: DM MODU (Burayı doldurabilirsin) ---
-        <>
-            {/* MESAJ LİSTESİ */}
-            <div 
-                ref={scrollContainerRef}
-                onScroll={handleScroll}
-                className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col"
-            >
-                {isLoading && (
-                    <div className="flex justify-center py-2"><FaSpinner className="animate-spin text-gray-400" /></div>
-                )}
+    <div className="flex-1 bg-[#1A1A1E] flex flex-col min-w-0 h-full relative">
+      {/* 1. KANAL BAŞLIĞI */}
+      {!chatType && (
+        <div className="h-12 border-b border-[#26272d] flex items-center px-4 shadow-sm flex-shrink-0 bg-[#121214]">
+            <FaHashtag className="text-gray-400 mr-2" size={20} />
+            <span className="font-bold text-white mr-4">{activeChannelName}</span>
+        </div>
+    )}
 
-                {/* HOŞ GELDİN MESAJI (Tepede) */}
-                {!hasMore && !isLoading && (
-                    <div className="mt-4 mb-8 px-4">
-                        <div className="w-[120px] h-[120px] bg-gray-600 rounded-full flex items-center justify-center mb-4">
-                            <img src={friendAvatar} className="w-full h-full rounded-full object-cover"/>
+      {/* 2. MESAJ ALANI */}
+      <div 
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col"
+      >
+        {isLoading && (
+            <div className="flex justify-center py-2"><FaSpinner className="animate-spin text-gray-400" /></div>
+        )}
+
+        {!hasMore && !isLoading && (
+            <div className="mt-4 mb-8 px-4">
+                <div className="w-16 h-16 bg-gray-600 rounded-full flex items-center justify-center mb-4">
+                    {chatType ? (
+                        <img src={friendAvatar} className="w-full h-full rounded-full object-cover"/>
+                    ) : (
+                        <FaHashtag size={32} className="text-white"/>
+                    )}
+                </div>
+                <h3 className="font-bold text-white text-3xl mb-2">
+                    {chatType ? activeChannelName : `#${activeChannelName} kanalına hoş geldin!`}
+                </h3>
+                <p className="text-gray-400">
+                    {chatType ? `Bu ${activeChannelName} ile olan sohbetin başlangıcı.` : `Burası #${activeChannelName} kanalının başlangıcı.`}
+                </p>
+            </div>
+        )}
+
+        <div className="flex flex-col pb-4">
+            {displayMessages.map((msg, index) => {
+                const senderId = typeof msg.sender === 'object' ? msg.sender._id : msg.sender;
+                const isMe = senderId === currentUser.id;
+                const prevMsg = displayMessages[index - 1];
+                const prevSenderId = prevMsg ? (typeof prevMsg.sender === 'object' ? prevMsg.sender._id : prevMsg.sender) : null;
+                const isSameUser = prevSenderId === senderId;
+                const timeDiff = prevMsg ? new Date(msg.timestamp) - new Date(prevMsg.timestamp) : 0;
+                const isNearTime = timeDiff < 60 * 60 * 1000;
+                const shouldGroup = isSameUser && isNearTime && !msg.attachmentUrl;
+
+                return (
+                    <React.Fragment key={msg._id || index}>
+                        {/* Okunmamış Mesaj Çizgisi */}
+                        {!isMe && lastReadMessageId && msg._id > lastReadMessageId && (!prevMsg || prevMsg._id <= lastReadMessageId) && (
+                            <div className="flex items-center my-2 select-none">
+                                <div className="h-[1px] bg-red-600 flex-1 opacity-60"></div>
+                                <span className="text-[10px] font-bold text-white bg-red-600 px-1 rounded mx-2">YENİ</span>
+                                <div className="h-[1px] bg-red-600 flex-1 opacity-60"></div>
+                            </div>
+                        )}
+                                                             {/* color: #212125ff*/}
+                        <div className={`group flex pr-4 pl-4 hover:bg-[#212125ff] -mx-4 transition-colors relative ${shouldGroup ? 'py-0.5 mt-0' : 'mt-[17px] py-0.5'}`}>
+                            {/* AVATAR */}
+                            <div className="w-[50px] flex-shrink-0 cursor-pointer">
+                                {!shouldGroup ? (
+                                    <div className="w-10 h-10 rounded-full bg-gray-600 overflow-hidden active:translate-y-0.5 transition-transform mt-0.5">
+                                        <AnimatedAvatar 
+                                            src={msg.sender?.avatar || "https://i.pravatar.cc/150"} 
+                                            alt={msg.senderNickname}
+                                            className="w-full h-full object-cover"
+                                        />
+                                    </div>
+                                ) : (
+                                    <div className="text-[10px] text-gray-500 hidden group-hover:block text-right w-10 mt-1.5 select-none">
+                                        {formatTimeOnly(msg.timestamp)}
+                                    </div>
+                                )}
+                            </div>
+                            
+                            {/* İÇERİK */}
+                            <div className="flex-1 min-w-0">
+                                {!shouldGroup && (
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <AnimatedNickname 
+                                            text={msg.sender?.nickname || msg.sender?.username || 'Kullanıcı'}
+                                            className="font-bold font-medium text-[16px] hover:underline cursor-pointer"
+                                            style={{ color: isMe ? '#eab308' : '#f87171' }} 
+                                        />
+                                        <span className="text-[12px] text-[#949BA4] font-medium mt-0.5">
+                                            {formatDateTime(msg.timestamp)}
+                                        </span>
+                                    </div>
+                                )}
+                                
+                                {/* METİN İÇERİĞİ */}
+                                {msg.content && (
+                                    <div className="text-[#dbdee1] whitespace-pre-wrap break-words leading-[1.375rem] text-[15px] font-normal">
+                                        {msg.content}
+                                    </div>
+                                )}
+                                {/* --- MEDYA / DOSYA GÖSTERİMİ --- */}
+                                {msg.attachmentUrl && (
+                                    <div className="mb-2">
+                                        {/* RESİM */}
+                                        {msg.attachmentType === 'image' && (
+                                            <div className="max-w-[500px] max-h-[300px] overflow-hidden rounded-lg cursor-pointer mt-2">
+                                                <img 
+                                                    src={msg.attachmentUrl} 
+                                                    className="max-w-full max-h-full object-contain rounded-lg hover:scale-[1.01] transition"
+                                                    alt="attachment"
+                                                    onClick={()=> window.open(msg.attachmentUrl, '_blank')}
+                                                />
+                                            </div>
+                                        )}
+
+                                        {/* VİDEO */}
+                                        {msg.attachmentType === 'video' && (
+                                            <div className="max-w-[500px] max-h-[300px] mt-2">
+                                                <video 
+                                                    src={msg.attachmentUrl} 
+                                                    controls 
+                                                    className="w-full rounded-lg bg-black max-w-[500px] max-h-[300px]"
+                                                />
+                                            </div>
+                                        )}
+
+                                        {/* DOSYA (İNDİRME KARTI) */}
+                                        {msg.attachmentType === 'file' && (
+                                            <div className="flex items-center gap-3 bg-[#121214] p-3 rounded max-w-[500px] mt-2 group/file hover:bg-[#1a1b1e] transition-colors border border-transparent hover:border-[#2b2d31]">
+                                                <div className="bg-[#1e1f22] p-3 rounded">
+                                                    <FaFileAlt size={24} className="text-blue-400"/>
+                                                </div>
+                                                <div className="flex-1 overflow-hidden">
+                                                    {/* Dosya İsmi */}
+                                                    <div 
+                                                        className="text-blue-400 text-sm font-medium hover:underline truncate cursor-pointer" 
+                                                        onClick={()=> window.open(msg.attachmentUrl, '_blank')}
+                                                        title={msg.fileName || getFileNameFromUrl(msg.attachmentUrl)} // Üzerine gelince tam isim yazar
+                                                    >
+                                                        {/* Varsa veritabanındaki ismi, yoksa URL'den üretilen ismi kullan */}
+                                                        {msg.fileName || getFileNameFromUrl(msg.attachmentUrl)}
+                                                    </div>
+                                                    
+                                                    {/* Dosya Uzantısı */}
+                                                    <div className="text-gray-500 text-xs font-bold">
+                                                        {getFileExtension(msg.attachmentUrl)} {msg.fileSize ? `- ${msg.fileSize}` : ''}
+                                                    </div>
+                                                </div>
+                                                <a href={msg.attachmentUrl} download target="_blank" rel="noreferrer" className="text-gray-400 hover:text-white p-2 rounded-full hover:bg-[#2b2d31] transition">
+                                                    <FaDownload />
+                                                </a>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                
+                            </div>
                         </div>
-                        <h3 className="font-bold text-white text-[35px] mb-2">{activeChannelName}</h3>
-                        <p className="text-gray-400">Bu <span className='font-bold text-white'>{activeChannelName}</span> kullanıcısıyla olan direkt mesaj geçmişinin başlangıcıdır.</p>
-                    </div>
-                )}
+                    </React.Fragment>
+                )
+            })}
+        </div>
+        <div ref={messagesEndRef} className="h-0" />
+      </div>
 
-                <div className="flex flex-col pb-4">
-                    {displayMessages.map((msg, index) => {
-                        const senderId = msg.sender?._id || msg.sender;
-                        const isMe = senderId === currentUser.id;
-                        
-                        const prevMsg = displayMessages[index - 1];
-                        const prevSenderId = prevMsg ? (typeof prevMsg.sender === 'object' ? prevMsg.sender._id : prevMsg.sender) : null;
-                        const isSameUser = prevSenderId === senderId;
-                        const timeDiff = prevMsg ? new Date(msg.timestamp) - new Date(prevMsg.timestamp) : 0;
-                        const isNearTime = timeDiff < 60 * 60 * 1000;
-                        const shouldGroup = isSameUser && isNearTime;
-
-                        return (
-                            <React.Fragment key={msg._id || index}>
-                                <div className={`group flex pr-4 pl-4 hover:bg-[#2e3035] -mx-4 transition-colors relative ${shouldGroup ? 'py-0.5 mt-0' : 'mt-[17px] py-0.5'}`}>
-                                    <div className="w-[50px] flex-shrink-0 cursor-pointer">
-                                        {!shouldGroup ? (
-                                            <div className="w-10 h-10 rounded-full bg-gray-600 overflow-hidden active:translate-y-0.5 transition-transform mt-0.5">
-                                                <AnimatedAvatar 
-                                                    src={msg.sender?.avatar || "https://i.pravatar.cc/150"} 
-                                                    alt={msg.senderNickname}
-                                                    className="w-full h-full object-cover" // className'i buraya veriyoruz
-                                                />
-                                            </div>
-                                        ) : (
-                                            <div className="text-[10px] text-gray-500 hidden group-hover:block text-right w-10 mt-1.5 select-none">
-                                            {formatTimeOnly(msg.timestamp)}
-                                            </div>
-                                        )}
-                                    </div>
-                                    
-                                    <div className="flex-1 min-w-0">
-                                        {!shouldGroup && (
-                                            <div className="flex items-center gap-2 mb-[2px]">
-                                                <AnimatedNickname 
-                                                    text={msg.sender?.nickname || msg.sender?.username || 'Kullanıcı'}
-                                                    className="font-bold font-medium text-[16px] hover:underline cursor-pointer"
-                                                    style={{ color: isMe ? '#eab308' : '#f87171' }} 
-                                                />
-                                                {msg.sender?.type === 'bot' && (
-                                                    <span className="bg-[#5865F2] text-white text-[10px] px-1.5 rounded-[4px] py-[1px] flex items-center h-4 leading-none">
-                                                        BOT
-                                                    </span>
-                                                )}
-                                                <span className="text-[12px] text-[#949BA4] font-medium mt-0.5">
-                                                    {formatDateTime(msg.timestamp)}
-                                                </span>
-                                            </div>
-                                        )}
-                                        <div className={`text-[#dbdee1] whitespace-pre-wrap break-words leading-[1.375rem] text-[15px] font-normal`}>
-                                            {msg.content}
-                                        </div>
-                                    </div>
-
-                                    {isMe && (
-                                        <div className="absolute right-4 -top-2 bg-[#313338] border border-[#26272d] rounded shadow-sm p-1 hidden group-hover:flex gap-2 items-center z-10">
-                                            <FaPen className="text-gray-400 hover:text-blue-400 cursor-pointer p-1.5 box-content" size={12} title="Düzenle"/>
-                                            <FaTrash className="text-gray-400 hover:text-red-400 cursor-pointer p-1.5 box-content" size={12} title="Sil"/>
-                                        </div>
-                                    )}
-                                </div>
-                            </React.Fragment>
-                        )
-                    })}
-                </div>
-                
-                <div ref={messagesEndRef} className="h-0" />
-            </div>
-
-            {/* INPUT ALANI */}
-            <div className="px-4 pb-6 pt-2 flex-shrink-0">
-                <div className="bg-[#222327] rounded-lg px-4 py-2.5 flex items-center">
-                    <button className="text-gray-400 mr-3 hover:text-white transition">
-                        <div className="w-6 h-6 bg-gray-400 rounded-full flex items-center justify-center text-[#313338] font-bold text-xs hover:bg-white transition"><FaPlus /></div>
-                    </button>
+      {/* --- YÜKLEME / ÖNİZLEME MODALI (Discord Tarzı) --- */}
+      {selectedFile && (
+        <div className="px-4 pb-0 flex-shrink-0">
+             <div className="bg-[#2b2d31] rounded-t-lg p-4 flex gap-4 border-b border-[#222327]">
+                <div className="w-40 h-40 bg-[#1e1f22] rounded flex items-center justify-center overflow-hidden border border-[#222327] relative">
+                    {fileType === 'image' ? (
+                        <img src={previewUrl} className="w-full h-full object-contain" alt="preview" />
+                    ) : fileType === 'video' ? (
+                        <video src={previewUrl} className="w-full h-full object-cover" />
+                    ) : (
+                        <FaFileAlt size={40} className="text-gray-400" />
+                    )}
                     
-                    <form onSubmit={handleSubmit} className="flex-1">
-                        <input 
-                            className="w-full bg-transparent text-gray-200 outline-none placeholder-[#949BA4] font-medium"
-                            placeholder={`${activeChannelName} kişisine mesaj gönder`}
-                            value={input}
-                            onChange={e => setInput(e.target.value)}
-                        />
-                    </form>
-                    <IoMdSend size={24} className="cursor-pointer text-gray-400 hover:text-[#5865F2] ml-3 transition" onClick={handleSubmit} />
-                </div>
-            </div>
-        </>
-
-      ) : (
-        
-        // --- 2. DURUM: NORMAL KANAL MODU ---
-        <> 
-            {/* ÜST BAR */}
-            <div className="h-12 border-b border-[#26272d] flex items-center px-4 shadow-sm flex-shrink-0 bg-[#121214]">
-                <FaHashtag className="text-gray-400 mr-2" size={20} />
-                <span className="font-bold text-white mr-4">{activeChannelName}</span>
-            </div>
-
-            {/* MESAJ LİSTESİ */}
-            <div 
-                ref={scrollContainerRef}
-                onScroll={handleScroll}
-                className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col"
-            >
-                {isLoading && (
-                    <div className="flex justify-center py-2"><FaSpinner className="animate-spin text-gray-400" /></div>
-                )}
-
-                {/* HOŞ GELDİN MESAJI (Tepede) */}
-                {!hasMore && !isLoading && (
-                    <div className="mt-4 mb-8 px-4">
-                        <div className="w-16 h-16 bg-gray-600 rounded-full flex items-center justify-center mb-4">
-                            <FaHashtag size={32} className="text-white"/>
-                        </div>
-                        <h3 className="font-bold text-white text-3xl mb-2">#{activeChannelName} kanalına hoş geldin!</h3>
-                        <p className="text-gray-400">Burası #{activeChannelName} kanalının başlangıcı.</p>
-                    </div>
-                )}
-
-                <div className="flex flex-col pb-4">
-                    {displayMessages.map((msg, index) => {
-                        const senderId = typeof msg.sender === 'object' ? msg.sender._id : msg.sender;
-                        const isMe = senderId === currentUser.id;
-                        
-                        const prevMsg = displayMessages[index - 1];
-                        const prevSenderId = prevMsg ? (typeof prevMsg.sender === 'object' ? prevMsg.sender._id : prevMsg.sender) : null;
-                        const isSameUser = prevSenderId === senderId;
-                        const timeDiff = prevMsg ? new Date(msg.timestamp) - new Date(prevMsg.timestamp) : 0;
-                        const isNearTime = timeDiff < 60 * 60 * 1000;
-                        const shouldGroup = isSameUser && isNearTime;
-
-                        return (
-                            <React.Fragment key={msg._id || index}>
-                                <div className={`group flex pr-4 pl-4 hover:bg-[#2e3035] -mx-4 transition-colors relative ${shouldGroup ? 'py-0.5 mt-0' : 'mt-[17px] py-0.5'}`}>
-                                    <div className="w-[50px] flex-shrink-0 cursor-pointer">
-                                        {!shouldGroup ? (
-                                            <div className="w-10 h-10 rounded-full bg-gray-600 overflow-hidden active:translate-y-0.5 transition-transform mt-0.5">
-                                                <AnimatedAvatar 
-                                                    src={msg.sender?.avatar || "https://i.pravatar.cc/150"} 
-                                                    alt={msg.senderNickname}
-                                                    className="w-full h-full object-cover" // className'i buraya veriyoruz
-                                                />
-                                            </div>
-                                        ) : (
-                                            <div className="text-[10px] text-gray-500 hidden group-hover:block text-right w-10 mt-1.5 select-none">
-                                            {formatTimeOnly(msg.timestamp)}
-                                            </div>
-                                        )}
-                                    </div>
-                                    
-                                    <div className="flex-1 min-w-0">
-                                        {!shouldGroup && (
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <AnimatedNickname 
-                                                    text={msg.sender?.nickname || msg.sender?.username || 'Kullanıcı'}
-                                                    className="font-bold font-medium text-[16px] hover:underline cursor-pointer"
-                                                    style={{ color: isMe ? '#eab308' : '#f87171' }} 
-                                                />
-                                                <span className="text-[12px] text-[#949BA4] font-medium mt-0.5">
-                                                    {formatDateTime(msg.timestamp)}
-                                                </span>
-                                            </div>
-                                        )}
-                                        <div className={`text-[#dbdee1] whitespace-pre-wrap break-words leading-[1.375rem] text-[15px] font-normal`}>
-                                            {msg.content}
-                                        </div>
-                                    </div>
-
-                                    {isMe && (
-                                        <div className="absolute right-4 -top-2 bg-[#313338] border border-[#26272d] rounded shadow-sm p-1 hidden group-hover:flex gap-2 items-center z-10">
-                                            <FaPen className="text-gray-400 hover:text-blue-400 cursor-pointer p-1.5 box-content" size={12} title="Düzenle"/>
-                                            <FaTrash className="text-gray-400 hover:text-red-400 cursor-pointer p-1.5 box-content" size={12} title="Sil"/>
-                                        </div>
-                                    )}
-                                </div>
-                            </React.Fragment>
-                        )
-                    })}
-                </div>
-                
-                <div ref={messagesEndRef} className="h-0" />
-            </div>
-
-            {/* INPUT ALANI */}
-            <div className="px-4 pb-6 pt-2 flex-shrink-0">
-                <div className="bg-[#222327] rounded-lg px-4 py-2.5 flex items-center">
-                    <button className="text-gray-400 mr-3 hover:text-white transition">
-                        <div className="w-6 h-6 bg-gray-400 rounded-full flex items-center justify-center text-[#313338] font-bold text-xs hover:bg-white transition"><FaPlus /></div>
+                    <button onClick={cancelUpload} className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 shadow-lg">
+                        <FaTimes size={10} />
                     </button>
-                    
-                    <form onSubmit={handleSubmit} className="flex-1">
-                        <input 
-                            className="w-full bg-transparent text-gray-200 outline-none placeholder-[#949BA4] font-medium"
-                            placeholder={`#${activeChannelName} kanalına mesaj gönder`}
-                            value={input}
-                            onChange={e => setInput(e.target.value)}
-                        />
-                    </form>
-                    <IoMdSend size={24} className="cursor-pointer text-gray-400 hover:text-[#5865F2] ml-3 transition" onClick={handleSubmit} />
                 </div>
-            </div>
-        </> // <--- KAPATICI FRAGMENT BURADA
+                <div className="flex-1 flex flex-col justify-center">
+                    <h4 className="text-white font-bold mb-1">Dosya Yükleniyor</h4>
+                    <p className="text-gray-400 text-sm mb-4 truncate">{selectedFile.name}</p>
+                    <div className="text-xs text-gray-500">Opsiyonel olarak bir mesaj ekleyebilirsin.</div>
+                </div>
+             </div>
+        </div>
       )}
+
+      {/* 3. INPUT ALANI */}
+      <div className={`px-4 pb-6 pt-2 flex-shrink-0 ${selectedFile ? 'bg-[#2b2d31] rounded-b-lg mx-4 pb-4 pt-0 px-4 mb-4' : ''}`}>
+          <div className={`${selectedFile ? '' : 'bg-[#383a40]'} rounded-lg px-4 py-3 flex items-center`}>
+              
+              {/* DOSYA YÜKLEME BUTONU */}
+              <button 
+                onClick={() => fileInputRef.current.click()} 
+                className="text-gray-400 mr-3 hover:text-white transition"
+                disabled={isUploading}
+              >
+                  <div className="w-6 h-6 bg-gray-400 rounded-full flex items-center justify-center text-[#313338] font-bold text-xs hover:bg-white transition">
+                    <FaPlus />
+                  </div>
+              </button>
+              
+              {/* GİZLİ INPUT */}
+              <input 
+                 type="file" 
+                 ref={fileInputRef} 
+                 onChange={handleFileSelect} 
+                 className="hidden" 
+              />
+
+              {/* YAZI INPUT */}
+              <form onSubmit={handleSubmit} className="flex-1">
+                  <input 
+                      className="w-full bg-transparent text-gray-200 outline-none placeholder-[#949BA4] font-medium"
+                      placeholder={selectedFile ? "Bir başlık ekle..." : `#${activeChannelName} kanalına mesaj gönder`}
+                      value={input}
+                      disabled={isUploading}
+                      onChange={e => setInput(e.target.value)}
+                  />
+              </form>
+              
+              {/* GÖNDER BUTONU */}
+              <button onClick={handleSubmit} disabled={isUploading} className="ml-3">
+                 {isUploading ? (
+                     <FaSpinner className="animate-spin text-blue-500" size={24} />
+                 ) : (
+                     <IoMdSend size={24} className={`transition ${input.trim() || selectedFile ? 'text-[#5865F2] cursor-pointer' : 'text-gray-500'}`} />
+                 )}
+              </button>
+          </div>
+      </div>
+
     </div>
-    );
+  );
 };
 
 export default ChatArea;

@@ -5,6 +5,7 @@ import {
   ControlBar,
   useParticipants,
   useTracks,
+  useRoomContext,
   useLocalParticipant,
 } from '@livekit/components-react';
 import '@livekit/components-styles'; // Varsayılan stiller
@@ -80,8 +81,8 @@ export default function VoiceChannel({
       {/* Bu bileşen, odadaki tüm sesleri (başkalarının sesini) tarayıcıya verir */}
       {!isDeafened && <RoomAudioRenderer />}
 
-      {/* 👇 YENİ: Mikrofonu ve Listeyi Yöneten Bileşenler */}
-      <MicController isMicMuted={isMicMuted} isDeafened={isDeafened} user={user} />
+      {/* 👇 GÜNCELLENDİ: Artık cihaz değişimlerini de yönetiyor */}
+      <DeviceController isMicMuted={isMicMuted} isDeafened={isDeafened} user={user} />
 
       {/* 👇 YENİ: Katılımcı Takipçisi */}
       <ParticipantListener setVoiceParticipants={setVoiceParticipants} />
@@ -92,31 +93,68 @@ export default function VoiceChannel({
 }
 
 // ==========================================
-// 🛠️ YENİ BİLEŞEN: Mikrofon Kontrolcüsü
+// 🛠️ GÜNCELLENMİŞ: Cihaz ve Mikrofon Kontrolcüsü
 // ==========================================
-function MicController({ isMicMuted, isDeafened, user }) {
-    // Kendi katılımcı objemizi alıyoruz
+function DeviceController({ isMicMuted, isDeafened, user }) {
     const { localParticipant } = useLocalParticipant();
+    const room = useRoomContext(); // 👈 Oda kontrolünü aldık
 
+    // 1. MUTE ve SAĞIRLIK AYARLARI (Mevcut Mantık)
     useEffect(() => {
         if (!localParticipant) return;
 
-        // Mantık: Eğer mute değilsek VE sağır değilsek mikrofon açık olsun.
         const shouldMicBeOn = !isMicMuted && !isDeafened;
-
-        // LiveKit'e emri veriyoruz:
         localParticipant.setMicrophoneEnabled(shouldMicBeOn);
 
         const newMetadata = {
             avatar: user.avatar,
             isDeafened: isDeafened
         };
-
         localParticipant.setMetadata(JSON.stringify(newMetadata));
         
-      }, [isMicMuted, isDeafened, localParticipant, user]);
+    }, [isMicMuted, isDeafened, localParticipant, user]);
 
-    return null; // Görüntü yok, sadece mantık
+    // 2. 🎧 SES GİRİŞ/ÇIKIŞ CİHAZI SEÇİMİ (YENİ EKLENDİ)
+    useEffect(() => {
+        if (!room) return;
+
+        const applyDevices = async () => {
+            // LocalStorage'dan seçili cihazları oku
+            const micId = localStorage.getItem('selectedAudioInput');
+            const speakerId = localStorage.getItem('selectedAudioOutput');
+
+            try {
+                // Mikrofonu değiştir
+                if (micId) {
+                    await room.switchActiveDevice('audioinput', micId);
+                    console.log("🎤 Mikrofon değiştirildi:", micId);
+                }
+
+                // Hoparlörü değiştir (Sadece destekleyen tarayıcılarda, örn: Chrome)
+                if (speakerId) {
+                    await room.switchActiveDevice('audiooutput', speakerId);
+                    console.log("🔊 Hoparlör değiştirildi:", speakerId);
+                }
+            } catch (error) {
+                console.error("Cihaz değiştirme hatası:", error);
+            }
+        };
+
+        // Bağlanınca hemen uygula
+        applyDevices();
+
+        // İPUCU: Kullanıcı ayarlardan cihazı değiştirdiğinde buranın haberi olması için
+        // basit bir event listener ekleyebiliriz. (Opsiyonel ama iyi olur)
+        const handleStorageChange = () => applyDevices();
+        window.addEventListener('device-change-request', handleStorageChange);
+
+        return () => {
+            window.removeEventListener('device-change-request', handleStorageChange);
+        };
+
+    }, [room]);
+
+    return null;
 }
 
 // --- YENİ BİLEŞEN: Katılımcıları Dinleyen ve App.jsx'e Gönderen ---

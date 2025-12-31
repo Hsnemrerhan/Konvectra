@@ -527,15 +527,21 @@ const handleRegister = async (username, password, nickname) => {
       window.location.href = '/';
   };
 
-  const handleSendMessage = (content) => {
+  const handleSendMessage = (messageData) => {
     if (!activeChannel) return;
+
+    // messageData şunları içeriyor: { content: "...", attachmentUrl: "...", attachmentType: "..." }
+
     socket.emit('chat_message', { 
         username: currentUser.username, 
-        content,
         channelId: activeChannel._id,
-        voiceChannelId: activeVoiceChannel ? activeVoiceChannel._id : null 
+        voiceChannelId: activeVoiceChannel ? activeVoiceChannel._id : null,
+        
+        // 👇 ESKİSİ: content,
+        // 👇 YENİSİ: Gelen tüm veriyi (yazı, dosya url, dosya tipi) buraya yayıyoruz:
+        ...messageData 
     });
-  };
+};
 
   // --- LIVEKIT SES HANDLERS ---
 

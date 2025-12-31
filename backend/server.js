@@ -93,7 +93,7 @@ const fileFilter = (req, file, cb) => {
     }
 };
 
-const upload = multer({ storage: storage, fileFilter: fileFilter, limits: { fileSize: 5 * 1024 * 1024 } }); // Max 5MB
+const upload = multer({ storage: storage, limits: { fileSize: 100 * 1024 * 1024 } }); // Max 5MB
 
 // --- MONGODB BAĞLANTISI ---
 const MONGO_URI = process.env.MONGO_URI;
@@ -177,6 +177,8 @@ const MessageSchema = new mongoose.Schema({
   content: String,
   sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   channelId: { type: mongoose.Schema.Types.ObjectId, ref: 'Channel' },
+  attachmentUrl: { type: String, default: null }, // Dosya Linki
+  attachmentType: { type: String, default: null }, // 'image', 'video', 'file'
   timestamp: { type: Date, default: Date.now }
 });
 const Message = mongoose.model('Message', MessageSchema);
@@ -1018,6 +1020,27 @@ app.get('/api/messages/:channelId', async (req, res) => {
   }
 });
 
+// --- MESAJ EKİ YÜKLEME ROTASI ---
+app.post('/api/chat/upload', upload.single('attachment'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: "Dosya yok" });
+
+    // 1. Dosya Türünü Belirle
+    const mime = req.file.mimetype;
+    let type = 'file';
+    if (mime.startsWith('image/')) type = 'image';
+    else if (mime.startsWith('video/')) type = 'video';
+
+    // 2. Backblaze'e Yükle (attachments klasörüne)
+    const cloudUrl = await uploadToB2(req.file, 'attachments');
+
+    res.json({ url: cloudUrl, type: type });
+  } catch (err) {
+    console.error("Upload hatası:", err);
+    res.status(500).json({ message: "Yükleme başarısız" });
+  }
+});
+
 app.post('/api/friends/request', async (req, res) => {
   const { senderId, targetCode } = req.body;
   try {
@@ -1258,7 +1281,9 @@ io.on('connection', async (socket) => {
           const newMessage = new Message({
             content: data.content,
             sender: user._id,
-            channelId: data.channelId || null 
+            channelId: data.channelId || null ,
+            attachmentUrl: data.attachmentUrl || null,
+            attachmentType: data.attachmentType || null
           });
           await newMessage.save();
           const populatedMsg = await newMessage.populate('sender', 'username nickname avatar color');
