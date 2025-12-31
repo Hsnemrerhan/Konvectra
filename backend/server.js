@@ -1278,6 +1278,51 @@ io.on('connection', async (socket) => {
       try {
         const user = await User.findOne({ username: data.username });
         if (user) {
+
+          if (data.content.startsWith('!play ')) {
+          const url = data.content.split(' ')[1];
+
+          // Kullanıcının ses kanalında olup olmadığını kontrol et
+          if (data.voiceChannelId) {
+              console.log(`🎵 Müzik İsteği: ${url} -> Kanal: ${data.voiceChannelId}`);
+              
+              // Kullanıcıya "Başlatılıyor" mesajı gönder
+              io.to(data.channelId).emit('chat_message', {
+                  _id: Date.now(),
+                  content: `🤖 Müzik Botu hazırlanıyor...`,
+                  sender: { username: "DJ Bot", type: "bot", avatar: "https://cdn-icons-png.flaticon.com/512/461/461238.png" },
+                  timestamp: new Date()
+              });
+
+              const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
+
+              const pythonProcess = spawn('python3', ['music_bot.py', data.voiceChannelId, url]);
+
+              pythonProcess.stdout.on('data', (output) => {
+                  console.log(`[MusicBot]: ${output}`);
+              });
+
+              pythonProcess.stderr.on('data', (error) => {
+                  console.error(`[MusicBot Error]: ${error}`);
+              });
+              
+              pythonProcess.on('close', (code) => {
+                  console.log(`MusicBot kapandı. Kod: ${code}`);
+              });
+
+              // Bu mesajı veritabanına kaydetmemek için return diyoruz
+              return; 
+          } else {
+              // Ses kanalında değilse uyar
+              io.to(data.channelId).emit('chat_message', {
+                  _id: Date.now(),
+                  content: `❌ Önce bir ses kanalına girmelisin!`,
+                  sender: { username: "Sistem", type: "bot" },
+                  timestamp: new Date()
+              });
+              return;
+          }
+      }
           const newMessage = new Message({
             content: data.content,
             sender: user._id,

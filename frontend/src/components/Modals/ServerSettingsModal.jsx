@@ -30,6 +30,19 @@ const ServerSettingsModal = ({ server, currentUser, onClose, onUpdateServer, onD
   const [deleteError, setDeleteError] = useState(''); // Hata mesajı (İsim yanlışsa)
   const [isDeleting, setIsDeleting] = useState(false); // Yükleniyor durumu
 
+  const [copiedMemberId, setCopiedMemberId] = useState(null);
+
+    const handleCopyMemberCode = (memberId, code) => {
+        if (!code) return;
+        navigator.clipboard.writeText(code);
+        setCopiedMemberId(memberId); // O kişinin ID'sini kaydet
+
+        // 2 saniye sonra resetle
+        setTimeout(() => {
+            setCopiedMemberId(null);
+        }, 2000);
+    };
+
   // --- DOSYA SEÇME VE KIRPMA İŞLEMLERİ ---
   const handleFileSelect = (e) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -331,7 +344,7 @@ const ServerSettingsModal = ({ server, currentUser, onClose, onUpdateServer, onD
                 </div>
             )}
 
-            {/* --- SEKME 3: ÜYELER (AYNI) --- */}
+            {/* --- SEKME 3: ÜYELER --- */}
             {activeTab === 'members' && (
                 <div className="animate-fade-in">
                     <h2 className="text-xl font-bold text-white mb-6">Üyeler</h2>
@@ -340,14 +353,29 @@ const ServerSettingsModal = ({ server, currentUser, onClose, onUpdateServer, onD
                             <div key={member.user._id} className="flex items-center justify-between p-2 hover:bg-[#2b2d31] rounded group">
                                 <div className="flex items-center gap-3">
                                     <div className="w-8 h-8 rounded-full bg-gray-600 overflow-hidden">
-                                        <img src={member.user.avatar} className="w-full h-full object-cover"/>
+                                        <img src={member.user.avatar} className="w-full h-full object-cover" alt="avatar"/>
                                     </div>
                                     <div>
                                         <div className="text-white font-medium flex items-center gap-2">
                                             {member.user.nickname || member.user.username}
                                             {server.owner === member.user._id && <FaCrown className="text-yellow-500" title="Sunucu Sahibi"/>}
                                         </div>
-                                        <div className="text-xs text-gray-400">#{member.user.friendCode}</div>
+                                        
+                                        {/* 👇 DEĞİŞİKLİK BURADA BAŞLIYOR 👇 */}
+                                        <div 
+                                            onClick={() => handleCopyMemberCode(member.user._id, member.user.friendCode)}
+                                            className={`text-xs cursor-pointer select-none transition-colors 
+                                                ${copiedMemberId === member.user._id 
+                                                    ? "text-green-400 font-bold" 
+                                                    : "text-gray-400 hover:text-white"}`}
+                                            title="Kodu kopyalamak için tıkla"
+                                        >
+                                            {copiedMemberId === member.user._id 
+                                                ? "Kopyalandı!" 
+                                                : `#${member.user.friendCode}`}
+                                        </div>
+                                        {/* 👆 DEĞİŞİKLİK BURADA BİTİYOR 👆 */}
+
                                     </div>
                                     <div className="flex gap-1 ml-2">
                                         {member.roles && member.roles.map(roleId => {
