@@ -1278,13 +1278,51 @@ io.on('connection', async (socket) => {
     }
   });
 
+  // Örnek: Socket event'i olarak (API olarak da yapabilirsin)
+  socket.on('get_or_create_dm', async ({ friendId }) => {
+      const myId = socket.userId; // Middleware'den gelen kendi ID'n
+
+      try {
+          // 1. Önce bu iki kişinin olduğu bir DM kanalı var mı ara
+          // MongoDB'de $all operatörü: Array içinde sırası fark etmeksizin bu ikisi var mı bakar.
+          let dmChannel = await Channel.findOne({
+              type: 'dm',
+              members: { $all: [myId, friendId] } 
+          });
+
+          // 2. Yoksa YENİ OLUŞTUR
+          if (!dmChannel) {
+              dmChannel = new Channel({
+                  type: 'dm',
+                  members: [myId, friendId], // İki kişinin ID'si
+                  name: 'Direct Message', // İsim opsiyonel, frontend'de arkadaşın adını gösterirsin
+                  serverId: null // Bu bir sunucuya ait değil
+              });
+              await dmChannel.save();
+          }
+
+          // 3. Kanalı Frontend'e Gönder (Kanal ID'si çok önemli)
+          socket.emit('dm_channel_loaded', dmChannel);
+
+          // Opsiyonel: Soketi bu odaya sok ki mesaj gelince anında görsün
+          socket.join(dmChannel._id.toString()); 
+
+      } catch (err) {
+          console.error("DM oluşturma hatası:", err);
+      }
+  });
+
   // 2. CHAT MESAJLARI
   socket.on('chat_message', async (data) => {
       try {
         const user = await User.findOne({ username: data.username });
         if (user) {
-
-          if (data.content.startsWith('!play ')) {
+          console.log(data);
+          
+          const messageContent = (data.content && typeof data.content === 'string') 
+          ? data.content 
+          : "";
+          if (messageContent.startsWith('!play ')) {
           const url = data.content.split(' ')[1];
 
           // Kullanıcının ses kanalında olup olmadığını kontrol et
@@ -1327,7 +1365,7 @@ io.on('connection', async (socket) => {
               });
               return;
           }
-      }
+          }
           const newMessage = new Message({
             content: data.content,
             sender: user._id,

@@ -197,9 +197,7 @@ const ChannelList = ({
                                     // LiveKit'ten gelen veri 'p.user' içindedir.
                                     const user = p.user || p; 
 
-                                    if (user.avatar && user.avatar.includes('http')) {
-        console.log("🔍 Şüpheli Avatar URL'si:", user.avatar);
-    }
+                                    
                                     
                                     // Socket verisinde isMuted/isSpeaking bilgisi olmaz, varsayılan false yapıyoruz.
                                     // Sadece kendi kanalımızdaysak (isActive) bu bilgiler doğrudur.

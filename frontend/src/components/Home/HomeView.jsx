@@ -13,6 +13,7 @@ const HomeView = ({
     handleSendFriendRequest, handleAcceptFriend, 
     socket,
     onSendMessage,
+    handleSendMessage,
     messages,
     fetchMessages,
     userPanelContent,
@@ -35,7 +36,7 @@ const [isDeafened, setIsDeafened] = useState(false);
       if (selectedFriend?._id === friend?._id) return;
 
       setSelectedFriend(friend);
-      
+      socket.emit('get_or_create_dm', { friendId: friend._id });
       if (friend) {
           try {
               const API_URL = `http://${window.location.hostname}:5000`;
@@ -165,7 +166,7 @@ const [isDeafened, setIsDeafened] = useState(false);
                          <ChatArea 
                             messages={messages} 
                             currentUser={currentUser} 
-                            onSendMessage={(content) => onSendMessage(content, dmRoomId)} 
+                            onSendMessage={handleSendMessage} 
                             activeChannelName={selectedFriend.nickname}
                             friendAvatar={selectedFriend.avatar}
                             activeChannelId={dmRoomId}

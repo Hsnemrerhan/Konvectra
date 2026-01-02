@@ -174,6 +174,19 @@ const closeFeedback = () => {
       }
   }, [activeChannel?._id]); 
 
+  useEffect(() => {
+    socket.on('dm_channel_loaded', (channel) => {
+        // 3. Backend kanalı buldu ve gönderdi.
+        // ARTIK BU KANALI AKTİF KANAL YAPIYORUZ! 🚀
+        setActiveChannel(channel);
+        
+        // Önemli: Sunucu modundan çıkıp DM moduna geçtiğimizi belirtelim
+        setActiveServer(null); 
+    });
+
+    return () => socket.off('dm_channel_loaded');
+}, []);
+
   // --- DATA FETCHING & SOCKET ---
   useEffect(() => {
     if (token && currentUser.id) {
@@ -559,7 +572,7 @@ const handleRegister = async (username, password, nickname) => {
     if (!activeChannel) return;
 
     // messageData şunları içeriyor: { content: "...", attachmentUrl: "...", attachmentType: "..." }
-
+    
     socket.emit('chat_message', { 
         username: currentUser.username, 
         channelId: activeChannel._id,
@@ -569,7 +582,7 @@ const handleRegister = async (username, password, nickname) => {
         // 👇 YENİSİ: Gelen tüm veriyi (yazı, dosya url, dosya tipi) buraya yayıyoruz:
         ...messageData 
     });
-};
+    };
 
   // --- LIVEKIT SES HANDLERS ---
 
@@ -988,6 +1001,7 @@ const voicePanelContent = activeVoiceChannel ? (
                 }}
                 messages={messages}
                 fetchMessages={fetchMessages}
+                handleSendMessage={handleSendMessage}
             />
         )}
       </div>

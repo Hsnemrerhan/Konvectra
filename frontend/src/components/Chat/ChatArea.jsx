@@ -92,7 +92,7 @@ const ChatArea = ({
   const handleSubmit = async (e) => {
     e?.preventDefault();
     if (!input.trim() && !selectedFile) return;
-
+    
     // 1. EĞER DOSYA VARSA ÖNCE YÜKLE
     if (selectedFile) {
         setIsUploading(true);
