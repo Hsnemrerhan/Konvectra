@@ -39,7 +39,14 @@ const [isDeafened, setIsDeafened] = useState(false);
       socket.emit('get_or_create_dm', { friendId: friend._id });
       if (friend) {
           try {
-              const API_URL = `http://${window.location.hostname}:5000`;
+            // Localhost mu yoksa Canlı Sunucu mu olduğunu anla
+            const isProduction = window.location.hostname !== 'localhost';
+
+            // Eğer canlıdaysak direkt domaini kullan (Port YOK, https VAR)
+            // Eğer localdeysek port 5000 kullan
+            const API_URL = isProduction
+                ? "https://konvectra.com"
+                : "http://localhost:5000";
               const res = await fetch(`${API_URL}/api/channels/dm`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
