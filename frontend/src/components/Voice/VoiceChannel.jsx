@@ -99,18 +99,39 @@ function DeviceController({ isMicMuted, isDeafened, user }) {
     const { localParticipant } = useLocalParticipant();
     const room = useRoomContext(); // 👈 Oda kontrolünü aldık
 
-    // 1. MUTE ve SAĞIRLIK AYARLARI (Mevcut Mantık)
+    // 1. MUTE ve METADATA AYARLARI (GÜVENLİ HALE GETİRİLDİ)
     useEffect(() => {
         if (!localParticipant) return;
 
-        const shouldMicBeOn = !isMicMuted && !isDeafened;
-        localParticipant.setMicrophoneEnabled(shouldMicBeOn);
+        const updateMyState = async () => {
+            try {
+                // A) Mikrofon Durumu
+                const shouldMicBeOn = !isMicMuted && !isDeafened;
+                
+                // Mikrofonu sadece durum farklıysa değiştir (Gereksiz işlemi önler)
+                if (localParticipant.isMicrophoneEnabled !== shouldMicBeOn) {
+                    await localParticipant.setMicrophoneEnabled(shouldMicBeOn);
+                }
 
-        const newMetadata = {
-            avatar: user.avatar,
-            isDeafened: isDeafened
+                // B) Metadata (Avatar ve Sağır Durumu)
+                const newMetadata = JSON.stringify({
+                    avatar: user.avatar,
+                    isDeafened: isDeafened
+                });
+
+                // 🛡️ ÖNEMLİ KONTROL: Sadece metadata değişmişse sunucuya gönder
+                // Bu, "SignalRequestError" hatasını ve flood yapmayı engeller.
+                if (localParticipant.metadata !== newMetadata) {
+                    await localParticipant.setMetadata(newMetadata);
+                }
+
+            } catch (error) {
+                // Hata olursa (Timeout vb.) sessizce konsola yaz ama uygulamayı çökertme
+                console.warn("⚠️ Metadata/Mikrofon güncellenemedi (Geçici sorun):", error);
+            }
         };
-        localParticipant.setMetadata(JSON.stringify(newMetadata));
+
+        updateMyState();
         
     }, [isMicMuted, isDeafened, localParticipant, user]);
 

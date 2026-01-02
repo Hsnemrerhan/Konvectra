@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import HomeSidebar from '../Layout/HomeSidebar';
 import UserList from '../Layout/UserList';
 import ChatArea from '../Chat/ChatArea';
 import VoiceCallPanel from '../Voice/VoiceCallPanel';
-import VoiceRoom from '../Voice/VoiceRoom'; 
 import AnimatedNickname from '../Chat/AnimatedNickname';
 import { FaHashtag, FaCheck, FaTimes, FaPhone, FaAt } from 'react-icons/fa';
 
@@ -16,82 +16,100 @@ const HomeView = ({
     handleSendMessage,
     messages,
     fetchMessages,
+    selectedFriend, 
+    setSelectedFriend,
     userPanelContent,
-    voicePanelContent
+    voicePanelContent, // App.jsx'ten Sidebar'a gitmesi için
+    onStartDmCall, // App.jsx'ten gelen fonksiyon
+    onEndCall,     // App.jsx'ten gelen fonksiyon
+    activeVoiceChannel, // App.jsx'ten gelen aktif kanal bilgisi
+    voiceParticipants,  // App.jsx'ten gelen katılımcı listesi (Eksikti, ekledim)
+    isMicMuted, toggleMic, isDeafened, toggleDeafen // App.jsx'ten gelen ses kontrolleri
 }) => {
+    const navigate = useNavigate();
   
-// DM ve Sesli Arama State'leri
-const [selectedFriend, setSelectedFriend] = useState(null);
-const [dmRoomId, setDmRoomId] = useState(null);
-const [isCallActive, setIsCallActive] = useState(false);
-const [callConnectionStatus, setCallConnectionStatus] = useState('disconnected');
-const [voiceParticipants, setVoiceParticipants] = useState([]);
-const [isMicMuted, setIsMicMuted] = useState(false);
-const [isDeafened, setIsDeafened] = useState(false);
+  // Sadece DM Odası ID'sini tutmak için local state (Bu kalabilir)
+  const [dmRoomId, setDmRoomId] = useState(null);
 
+  // 1. ARKADAŞ SEÇİLİNCE (DM KANALI BUL)
+  const handleSelectFriend = (friend) => {
+    if (!friend) return;
+    if (selectedFriend?._id === friend._id) return;
 
-
-  // 1. ARKADAŞ SEÇİLİNCE (DM BAŞLAT)
-  const handleSelectFriend = async (friend) => {
-      if (selectedFriend?._id === friend?._id) return;
-
-      setSelectedFriend(friend);
-      socket.emit('get_or_create_dm', { friendId: friend._id });
-      if (friend) {
-          try {
-            // Localhost mu yoksa Canlı Sunucu mu olduğunu anla
-            const isProduction = window.location.hostname !== 'localhost';
-
-            // Eğer canlıdaysak direkt domaini kullan (Port YOK, https VAR)
-            // Eğer localdeysek port 5000 kullan
-            const API_URL = isProduction
-                ? "https://konvectra.com"
-                : "http://localhost:5000";
-              const res = await fetch(`${API_URL}/api/channels/dm`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ myId: currentUser.id, friendId: friend._id })
-              });
-              
-              const data = await res.json();
-              const realDmRoomId = data.channelId; 
-
-              setDmRoomId(realDmRoomId);
-              socket.emit("join_dm_room", realDmRoomId);
-              fetchMessages(realDmRoomId);
-
-          } catch (error) {
-              console.error("DM başlatılamadı:", error);
-          }
-      } else {
-          setDmRoomId(null);
-      }
+    // 1. Sadece seçimi yap (Data çekme işini useEffect'e devredeceğiz)
+    setSelectedFriend(friend);
+    
+    // 2. URL'yi güncelle
+    navigate(`/dm/${friend.friendCode}`);
   };
 
-  // 2. SESLİ ARAMA KONTROLLERİ
+  // Sekme değiştirince (Online, Tümü vb.) DM'den çıkıp Dashboard'a dön
+    const handleTabChange = (tab) => {
+        setActiveTab(tab);       // 1. İstenen sekmeyi ayarla
+        setSelectedFriend(null); // 2. Arkadaş seçimini temizle (Böylece Dashboard görünür)
+    };
+
+  // 2. SESLİ ARAMA KONTROLLERİ (App.jsx'e yönlendirir)
   const startCall = () => {
-      setIsCallActive(true);
-      setCallConnectionStatus('connecting');
-  };
+        if (dmRoomId && selectedFriend) {
+            onStartDmCall(selectedFriend, dmRoomId);
+        } else {
+            console.error("DM ID veya Arkadaş bulunamadı");
+        }
+    };
 
-  const endCall = () => {
-      setIsCallActive(false);
-      setCallConnectionStatus('disconnected');
-      if (dmRoomId) socket.emit("leave_voice_room", dmRoomId);
-  };
+    // HomeView.jsx
 
-  // 👇 YENİ EKLENECEK KISIM: SENKRONİZASYON 👇
+// ⚡ OTOMATİK DM BAĞLANTISI (F5 ve Tıklama için Ortak Çözüm)
+useEffect(() => {
+    const initializeDmChannel = async () => {
+        // Eğer arkadaş seçili değilse işlem yapma
+        if (!selectedFriend) {
+            setDmRoomId(null); // Odayı kapat
+            return;
+        }
+
+        try {
+            // 1. Socket'e haber ver (Backend hazırlık yapsın)
+            socket.emit('get_or_create_dm', { friendId: selectedFriend._id });
+
+            // 2. API'den Kanal ID'sini al (Bu ID mesajlaşmak için şart)
+            const isProduction = window.location.hostname !== 'localhost';
+            const API_URL = isProduction ? "https://konvectra.com" : "http://localhost:5000";
+
+            const res = await fetch(`${API_URL}/api/channels/dm`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ myId: currentUser.id, friendId: selectedFriend._id })
+            });
+
+            const data = await res.json();
+            const realDmRoomId = data.channelId;
+
+            // 3. State'i güncelle ve Odaya gir
+            if (realDmRoomId) {
+                setDmRoomId(realDmRoomId); // Artık mesaj atabilirsin ✅
+                socket.emit("join_dm_room", realDmRoomId); // Odaya katıldın ✅
+                fetchMessages(realDmRoomId); // Geçmiş mesajları çektin ✅
+                
+                console.log(`✅ DM Odasına Girildi: ${selectedFriend.nickname} (ID: ${realDmRoomId})`);
+            }
+
+        } catch (error) {
+            console.error("DM Bağlantı Hatası:", error);
+        }
+    };
+
+    initializeDmChannel();
+
+}, [selectedFriend]); // 👈 DİKKAT: Bu useEffect, selectedFriend değiştiği an çalışır.
+
+  // 3. ARKADAŞ BİLGİSİ SENKRONİZASYONU
   useEffect(() => {
-      // Eğer şu an bir arkadaş seçiliyse
       if (selectedFriend) {
-          // App.jsx'ten gelen güncel 'friends' listesinin içinde bu arkadaşı bul
           const updatedFriendData = friends.find(f => f._id === selectedFriend._id);
-          
-          // Eğer güncel veri varsa ve eskisiyle farklıysa (nickname, avatar, status vs.)
           if (updatedFriendData) {
-              // State'i güncelle ki ekrandaki AnimatedNickname tetiklensin
               setSelectedFriend(prev => {
-                  // Gereksiz render'ı önlemek için basit bir kontrol (Opsiyonel ama iyi olur)
                   if (prev.nickname !== updatedFriendData.nickname || 
                       prev.avatar !== updatedFriendData.avatar ||
                       prev.status !== updatedFriendData.status) {
@@ -101,15 +119,20 @@ const [isDeafened, setIsDeafened] = useState(false);
               });
           }
       }
-  }, [friends]); // 'friends' prop'u her değiştiğinde (Socket olayında) çalışır
-  // 👆 YENİ EKLENECEK KISIM BİTTİ 👆
+  }, [friends, selectedFriend, setSelectedFriend]);
+
+  // 4. BÜYÜK PANELİ GÖSTERME MANTIĞI 🧠
+  // "Aktif arama var mı?" VE "Bu arama DM mi?" VE "Konuştuğumuz kişi bu mu?"
+  const showBigPanel = activeVoiceChannel && 
+                       activeVoiceChannel.type === 'dm' && 
+                       activeVoiceChannel.friendId === selectedFriend?._id;
 
   return (
     <div className="flex w-full h-full">
         {/* SOL: HOME SIDEBAR */}
         <HomeSidebar 
             activeTab={activeTab}
-            setActiveTab={setActiveTab}
+            setActiveTab={handleTabChange}
             incomingRequestsCount={incomingRequests.length}
             currentUser={currentUser}
             handleLogout={handleLogout}
@@ -128,30 +151,27 @@ const [isDeafened, setIsDeafened] = useState(false);
                 // === DM MODU ===
                 <div className="flex flex-col h-full w-full">
                     
-                    {isCallActive && (
+                    {/* 👇 BÜYÜK PANEL (Sadece showBigPanel true ise görünür) */}
+                    {showBigPanel && (
                         <div className="flex-shrink-0 z-20">
                             <VoiceCallPanel 
                                 friend={selectedFriend}
-                                onEndCall={endCall}
+                                onEndCall={onEndCall}
                                 isMicMuted={isMicMuted}
-                                toggleMic={() => setIsMicMuted(!isMicMuted)}
+                                toggleMic={toggleMic}
                                 isDeafened={isDeafened}
-                                toggleDeafen={() => setIsDeafened(!isDeafened)}
-                                connectionStatus={callConnectionStatus}
+                                toggleDeafen={toggleDeafen}
+                                // Eğer voiceParticipants undefined ise boş dizi gönder
+                                participants={voiceParticipants || []}
+                                connectionStatus={(voiceParticipants && voiceParticipants.length > 0) ? 'connected' : 'connecting'}
                             />
-                            <VoiceRoom 
-                                serverId="DM" 
-                                channelId={dmRoomId}
-                                socket={socket}
-                                currentUser={currentUser}
-                                setVoiceParticipants={setVoiceParticipants}
-                                isMicMuted={isMicMuted}
-                                isDeafened={isDeafened}
-                            />
+                            {/* VoiceRoom BURADAN SİLİNDİ (Artık App.jsx'te) */}
                         </div>
                     )}
 
-                    {!isCallActive && (
+                    {/* Üst Bar (Sadece Arama Yokken veya Küçük Panel Modundayken Görünür İstersen) */}
+                    {/* İstersen showBigPanel varsa burayı gizleyebilirsin, ama genelde kalır. */}
+                    {!showBigPanel && (
                         <div className="h-12 border-b border-[#26272d] flex items-center justify-between px-4 shadow-sm bg-[#121214]">
                             <div className="flex items-center gap-3">
                                 <FaAt className="text-gray-400"/>
@@ -186,42 +206,41 @@ const [isDeafened, setIsDeafened] = useState(false);
                 </div>
 
             ) : (
-                // === DASHBOARD MODU (Senin Eski Kodun Burada) ===
+                // === DASHBOARD MODU ===
                 <div className="flex-1 bg-[#1A1A1E] p-8 flex flex-col overflow-y-auto">
-                    
+                    {/* ... Burası senin Dashboard kodların (Aynı kalıyor) ... */}
+                    {/* ... (Kodun geri kalanı çok uzun olduğu için burayı kısalttım, senin kodunda zaten var) ... */}
+                     
                     {/* Sekme: Arkadaş Ekle */}
                     {activeTab === 'add' && (
                         <div>
                             <h2 className="uppercase font-bold text-[20px] text-white mb-2">Arkadaş Ekle</h2>
                             <div className="text-[15px] text-gray-400 mb-4">Arkadaşının kodunu girerek onu ekleyebilirsin.</div>
                             <div className="flex items-center bg-[#1e1f22] p-2 rounded-lg border border-black focus-within:border-blue-500 transition-colors">
-    
-                            {/* SABİT HASH İŞARETİ */}
-                            <span className="text-gray-400 font-bold text-lg px-2 select-none">#</span>
-
-                            {/* INPUT */}
-                            <input 
-                                value={friendInput} 
-                                onChange={e => setFriendInput(e.target.value.toUpperCase().trim())} // Otomatik büyük harf ve boşluk temizleme
-                                maxLength={7} // Kod uzunluğu limiti
-                                placeholder="ARKADAŞ KODU" 
-                                className="bg-transparent outline-none flex-1 text-white placeholder-gray-500 font-mono tracking-wider uppercase"
-                            />
-
-                            {/* BUTON (Aynı kalıyor) */}
-                            <button 
-                                onClick={handleSendFriendRequest} 
-                                disabled={!friendInput || friendInput.length < 7} // Kod eksikse buton pasif olsun
-                                className="bg-[#5865F2] px-4 py-1 rounded text-sm font-bold disabled:cursor-not-allowed text-white hover:bg-[#4752c4] transition ml-2"
-                            >
-                                İstek Gönder
-                            </button>
-
-                        </div>
+                                <span className="text-gray-400 font-bold text-lg px-2 select-none">#</span>
+                                <input 
+                                    value={friendInput} 
+                                    onChange={e => setFriendInput(e.target.value.toUpperCase().trim())}
+                                    maxLength={7}
+                                    placeholder="ARKADAŞ KODU" 
+                                    className="bg-transparent outline-none flex-1 text-white placeholder-gray-500 font-mono tracking-wider uppercase"
+                                />
+                                <button 
+                                    onClick={handleSendFriendRequest} 
+                                    disabled={!friendInput || friendInput.length < 7}
+                                    className="bg-[#5865F2] px-4 py-1 rounded text-sm font-bold disabled:cursor-not-allowed text-white hover:bg-[#4752c4] transition ml-2"
+                                >
+                                    İstek Gönder
+                                </button>
+                            </div>
                         </div>
                     )}
-
-                    {/* Sekme: Bekleyen İstekler */}
+                    
+                    {/* ... Diğer sekmeler (Pending, Online vb.) senin kodunda zaten var, buraya ekleyebilirsin ... */}
+                    {/* Burada kod kalabalığı yapmamak için kestiğim kısımları kendi kodundan alıp yapıştırabilirsin */}
+                    {/* ÖNEMLİ: Hata veren yer yukarıdaki return bloğuydu, orayı düzelttim. */}
+                    
+                     {/* Sekme: Bekleyen İstekler */}
                     {activeTab === 'pending' && (
                         <div>
                             <h2 className="uppercase font-bold text-gray-400 text-xs mb-4">Bekleyen İstekler — {incomingRequests.length}</h2>
@@ -265,9 +284,6 @@ const [isDeafened, setIsDeafened] = useState(false);
                                     .map(friend => (
                                         <div 
                                             key={friend._id} 
-                                            // BURAYA DİKKAT: Listeden de tıklayınca DM açılsın istiyorsan buraya onClick ekleyebiliriz.
-                                            // Ama sen sidebar'dan açılsın, burası sadece liste olsun istemiştin sanırım.
-                                            // Eğer buradan da açılsın istersen: onClick={() => handleSelectFriend(friend)}
                                             className="flex items-center justify-between p-3 hover:bg-[#393d42] rounded border-t border-gray-700 cursor-pointer group"
                                         >
                                             <div className="flex items-center gap-3">
@@ -295,7 +311,6 @@ const [isDeafened, setIsDeafened] = useState(false);
                                             </div>
 
                                             <div className="flex gap-2 opacity-0 group-hover:opacity-100 bg-[#2f3136] p-2 rounded-full transition-opacity">
-                                                {/* Buradaki butona basınca da DM açılsın */}
                                                 <div 
                                                     onClick={(e) => { e.stopPropagation(); handleSelectFriend(friend); }}
                                                     className="w-8 h-8 rounded-full bg-[#313338] flex items-center justify-center text-gray-400 hover:text-white" 
@@ -307,7 +322,6 @@ const [isDeafened, setIsDeafened] = useState(false);
                                         </div>
                                     ))
                                 }
-
                                 {friends.filter(f => activeTab === 'online' ? (f.status && f.status !== 'offline') : true).length === 0 && (
                                     <div className="text-center mt-20 opacity-60">
                                         <div className="text-4xl mb-4 grayscale">😴</div>

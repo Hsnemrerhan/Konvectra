@@ -1,6 +1,7 @@
 // frontend/src/components/Layout/HomeSidebar.jsx
 import UserProfile from './UserProfile'; 
 import AnimatedNickname from '../Chat/AnimatedNickname';
+import { useNavigate } from 'react-router-dom';
 
 const HomeSidebar = ({ 
   activeTab, 
@@ -15,6 +16,29 @@ const HomeSidebar = ({
   onOpenSettings,
   voicePanelContent
 }) => {
+  const navigate = useNavigate();
+  // 🌟 SEKMELER ARASI GEÇİŞ VE URL YÖNETİMİ
+    const handleTabChange = (tabName) => {
+        // 1. Önce state'i güncelle (Hızlı tepki için)
+        setActiveTab(tabName);
+        
+        // 2. DM seçiliyse iptal et (Dashboard'a dönmek için)
+        // (Eğer onSelectFriend fonksiyonun null kabul ediyorsa)
+        if (onSelectFriend) onSelectFriend(null); 
+
+        // 3. URL Haritası (İstediğin URL yapısı)
+        const urlMap = {
+            'online': '/servers/@me/online-friends',
+            'all': '/servers/@me/friends',
+            'pending': '/servers/@me/friend-requests',
+            'add': '/servers/@me/add-friend'
+        };
+
+        // 4. URL'ye git
+        if (urlMap[tabName]) {
+            navigate(urlMap[tabName]);
+        }
+    };
   return (
     <div className="w-[18%] min-w-[192px] bg-[#121214] flex flex-col flex-shrink-0">
       
@@ -28,19 +52,19 @@ const HomeSidebar = ({
         
         {/* --- STATİK MENÜLER --- */}
         <div 
-          onClick={() => { setActiveTab('online'); onSelectFriend(null); }} 
+          onClick={() => handleTabChange('online')} 
           className={`px-2 py-2 rounded cursor-pointer font-medium text-sm ${activeTab==='online' && !activeFriendId ? 'bg-[#393d42] text-white' : 'text-gray-400 hover:bg-[#34373c] hover:text-gray-200'}`}
         >
           Çevrimiçi
         </div>
         <div 
-          onClick={() => { setActiveTab('all'); onSelectFriend(null); }} 
+          onClick={() => handleTabChange('all')}
           className={`px-2 py-2 rounded cursor-pointer font-medium text-sm ${activeTab==='all' && !activeFriendId ? 'bg-[#393d42] text-white' : 'text-gray-400 hover:bg-[#34373c] hover:text-gray-200'}`}
         >
           Tümü
         </div>
         <div 
-          onClick={() => { setActiveTab('pending'); onSelectFriend(null); }} 
+          onClick={() => handleTabChange('pending')}
           className={`px-2 py-2 rounded cursor-pointer font-medium text-sm flex justify-between items-center ${activeTab==='pending' && !activeFriendId ? 'bg-[#393d42] text-white' : 'text-gray-400 hover:bg-[#34373c] hover:text-gray-200'}`}
         >
           <span>Bekleyenler</span>
@@ -51,7 +75,7 @@ const HomeSidebar = ({
           )}
         </div>
         <div 
-          onClick={() => { setActiveTab('add'); onSelectFriend(null); }} 
+          onClick={() => handleTabChange('add')}
           className={`px-2 py-2 rounded cursor-pointer font-medium text-sm ${activeTab==='add' && !activeFriendId ? 'bg-transparent text-green-500' : 'text-green-500 hover:bg-[#34373c]'}`}
         >
           Arkadaş Ekle
@@ -76,7 +100,7 @@ const HomeSidebar = ({
                     {/* Avatar + Status Dot */}
                     <div className="relative w-8 h-8 flex-shrink-0">
                         <img 
-                            src={friend.avatar || "https://i.pravatar.cc/150"} 
+                            src={friend.avatar} 
                             className="w-full h-full rounded-full object-cover" 
                             alt={friend.nickname}
                         />

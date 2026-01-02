@@ -73,6 +73,7 @@ function App() {
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isDeafened, setIsDeafened] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [selectedFriend, setSelectedFriend] = useState(null);
   
   // 🎤 YENİ SES STATE'İ
   // Sadece hangi kanalda olduğumuzu tutuyoruz. Katılımcıları LiveKit hallediyor.
@@ -98,6 +99,37 @@ const closeFeedback = () => {
       setCreateModal({ isOpen: true, type }); 
   };
 
+  // Arama Başlatma (HomeView'dan tetiklenecek)
+const handleStartDmCall = (friend, roomId) => {
+    // Mevcut VoiceChannel bileşeninin beklediği formatta veriyi hazırlıyoruz
+    const channelData ={
+        _id: roomId,          // 👈 VoiceChannel bunu 'channelId' olarak alacak
+        name: friend.nickname || friend.username, // Kanal adı olarak arkadaşın adı
+        type: 'dm',           // Bunu UI'da (Panelde) ayrım yapmak için ekliyoruz
+        friendId: friend._id,  // Doğru arkadaşın sayfasında mıyız kontrolü için
+        avatar: friend.avatar
+    };
+    console.log("aloooo");
+    setActiveVoiceChannel(channelData);
+    
+    sessionStorage.setItem('activeVoiceSession', JSON.stringify(channelData));
+    
+    // Bağlantı başladığı için katılımcı listesini sıfırla
+    setVoiceParticipants([]);
+};
+
+// Aramayı Bitirme (Her yerden çağrılabilir)
+const handleEndCall = () => {
+    const channelId = activeVoiceChannel?.id;
+    setActiveVoiceChannel(null); // State'i temizle
+    setVoiceParticipants([]);
+    
+    // Eğer odaya bağlıysak socket'e çıkış bildir
+    if (channelId) {
+        socket.emit("leave_voice_room", channelId); 
+    }
+};
+
   useEffect(() => {
     // Sunucudan gelen ses durumu güncellemesini dinle
     socket.on('voice-state-update', (currentVoiceState) => {
@@ -110,61 +142,106 @@ const closeFeedback = () => {
 }, []);
   
   // --- AKILLI YÖNLENDİRME (ROUTING) ---
-  useEffect(() => {
-    if (location.pathname === '/') {
-        navigate('/servers/@me');
-        return;
-    }
-    if (location.pathname.includes('/servers/@me')) {
-        setActiveServer(null);
-        setActiveChannel(null);
-        return;
-    }
-    if (myServers.length > 0 && location.pathname.includes('/servers/')) {
-        const parts = location.pathname.split('/');
-        const serverId = parts[2]; 
-        const channelId = parts[4]; 
+  // --- AKILLI YÖNLENDİRME VE STATE SENKRONİZASYONU ---
+useEffect(() => {
+    // 1. Veriler yüklenmeden işlem yapma (Hata almamak için)
+    if (!friends || !myServers) return; 
 
-        if (serverId) {
-            const targetServer = myServers.find(s => s._id === serverId);
-            if (targetServer) {
-                if (activeServer?._id !== targetServer._id) {
-                    setActiveServer(targetServer);
-                }
+    const path = location.pathname;
+    const parts = path.split('/'); // Örn: ["", "servers", "123", ...]
 
-                const textChannels = targetServer.channels?.filter(c => c.type === 'text') || [];
-                const firstTextChannel = textChannels[0];
-
-                if (textChannels.length === 0) {
-                    if (!location.pathname.includes('/welcome')) {
-                        navigate(`/servers/${serverId}/welcome`, { replace: true });
-                    }
-                    setActiveChannel(null);
-                    return; 
-                }
-
-                if (location.pathname.includes('/welcome') || !channelId) {
-                    if (firstTextChannel) {
-                        navigate(`/servers/${serverId}/channels/${firstTextChannel._id}`, { replace: true });
-                    }
-                    return; 
-                }
-
-                if (channelId) {
-                    const targetChannel = targetServer.channels?.find(c => c._id === channelId);
-                    if (targetChannel) {
-                        setActiveChannel(targetChannel);
-                        if (activeChannel?._id !== targetChannel._id) {
-                            setMessages([]); 
-                            setHasMoreMessages(true);
-                            fetchMessages(targetChannel._id); 
-                        }
-                    }
-                }
+    // --- SENARYO 1: DM SAYFASI (/dm/Kod) ---
+    if (path.startsWith('/dm/')) {
+        const urlCode = parts[2];
+        const targetFriend = friends.find(f => f.friendCode === urlCode);
+        
+        if (targetFriend) {
+            // Eğer o an başka bir yerdeysek (Sunucu veya başka arkadaş), buraya geç
+            if (activeServer || selectedFriend?._id !== targetFriend._id) {
+                setActiveServer(null);           // Sunucudan çık
+                setSelectedFriend(targetFriend); // Arkadaşı seç
             }
         }
+    } 
+    
+    // ... SENARYO 2: SUNUCU KISMI (GÜNCELLENMİŞ) ...
+    // ... SENARYO 2: SUNUCU KISMI (GÜNCELLENMİŞ OTOMATİK KANAL SEÇİMİ) ...
+    else if (path.startsWith('/servers/') && !path.includes('@me')) {
+        const urlServerId = parts[2];
+        const urlChannelId = parts[4]; // URL'deki kanal ID'si (varsa)
+
+        const targetServer = myServers.find(s => s._id === urlServerId);
+
+        if (targetServer) {
+            // 1. Sunucuyu Aktif Et
+            if (activeServer?._id !== targetServer._id) {
+                setSelectedFriend(null);       // DM'i kapat
+                setActiveServer(targetServer); // Sunucuyu aç
+            }
+
+            // 2. Hangi Kanalı Açacağız?
+            let targetChannel = null;
+
+            if (urlChannelId) {
+                // A) URL'de kanal ID'si varsa onu bul
+                if (targetServer.channels) {
+                    targetChannel = targetServer.channels.find(c => c._id === urlChannelId);
+                }
+            } else {
+                // B) URL'de kanal yoksa, LİSTENİN İLK KANALINI seç (Default Channel)
+                const firstTextChannel = targetServer.channels?.find(c => c.type === 'text');
+
+                if (firstTextChannel) {
+                    // Metin kanalı varsa ONA git
+                    navigate(`/servers/${targetServer._id}/channels/${firstTextChannel._id}`, { replace: true });
+                } else {
+                    // 🚨 Metin kanalı YOKSA -> WELCOME sayfasına git
+                    console.log("Metin kanalı bulunamadı, Welcome sayfasına yönlendiriliyor.");
+                    
+                    // Kanal seçimini temizle (Chat ekranı açılmasın)
+                    // setActiveChannel(null); 
+                    
+                    navigate(`/servers/${targetServer._id}/welcome`, { replace: true });
+                }
+            }
+
+            // 3. Kanalı State'e Yaz (Eğer App.jsx'te böyle bir state varsa)
+            if (targetChannel) {
+                // Eğer kodunda setActiveChannel veya setActiveTextChannel varsa burayı ona göre düzenle:
+                setActiveChannel(targetChannel); 
+                
+                // Opsiyonel: URL'i de kanallı hale getir ki tam olsun (/servers/ID/channels/KANAL_ID)
+                if (!urlChannelId) {
+                    navigate(`/servers/${targetServer._id}/channels/${targetChannel._id}`, { replace: true });
+                }
+            }
+        } 
     }
-  }, [location.pathname, myServers]);
+
+    // --- SENARYO 3: DASHBOARD SEKMELERİ (/servers/@me/...) ---
+    else if (path.startsWith('/servers/@me')) {
+        // DM ve Sunucu seçimini temizle (Dashboard açılsın)
+        if (selectedFriend || activeServer) {
+            setSelectedFriend(null);
+            setActiveServer(null);
+        }
+
+        // Sekmeyi ayarla
+        if (path.includes('/online-friends')) setActiveTab('online');
+        else if (path.includes('/friends')) setActiveTab('all');
+        else if (path.includes('/friend-requests')) setActiveTab('pending');
+        else if (path.includes('/add-friend')) setActiveTab('add');
+        else {
+             setActiveTab('online');
+        }
+    }
+    
+    // --- SENARYO 4: Ana Kök (/) ---
+    else if (path === '/') {
+         navigate('/servers/@me/online-friends', { replace: true });
+    }
+
+}, [location.pathname, friends, myServers]); // 👈 myServers EKLENDİ!
 
   useEffect(() => {
       if (activeChannel && activeChannel._id) {
@@ -326,42 +403,91 @@ const closeFeedback = () => {
     };
   }, [token, currentUser.id]);
 
+  
 
-// 🔄 F5 SONRASI OTOMATİK BAĞLANMA (Rejoin)
-useEffect(() => {
-    // 1. Sunucu listesi (myServers) henüz yüklenmediyse bekle
-    if (!myServers || myServers.length === 0) return;
+  // 🔄 URL -> STATE EŞLEŞTİRMESİ (F5 atınca çalışır)
+    useEffect(() => {
+        // 1. Arkadaşlar yüklenmeden işlem yapma
+        if (!friends || friends.length === 0) return;
 
-    // 2. Hafızadaki son kanal ID'sini oku
-    const savedChannelId = sessionStorage.getItem('lastVoiceChannelId');
+        const path = location.pathname;
 
-    // 3. ID var ama state boşsa (yani sayfa yeni açıldıysa)
-    if (savedChannelId && !activeVoiceChannel) {
-        
-        let foundChannel = null;
+        // SENARYO 1: URL "/dm/X92K1" formatındaysa
+        if (path.startsWith('/dm/')) {
+            const urlCode = path.split('/')[2]; // "X92K1" kısmını al
 
-        // 4. `myServers` içindeki tüm sunucuları ve kanalları tara
-        for (const server of myServers) {
-            // Sunucunun kanalları var mı kontrol et
-            if (server.channels) {
-                const channel = server.channels.find(c => c._id === savedChannelId);
-                if (channel) {
-                    foundChannel = channel;
-                    break; // Bulduk, döngüyü bitir
+            const targetFriend = friends.find(f => f.friendCode === urlCode);
+
+            if (targetFriend) {
+                // Eğer farklı bir yerdeysek veya arkadaş seçili değilse güncelle
+                if (activeServer || selectedFriend?._id !== targetFriend._id) {
+                    console.log("🔗 URL'den arkadaşa gidiliyor:", targetFriend.nickname);
+                    
+                    setActiveServer(null); // Sunucudan çık (Home'a geç)
+                    setSelectedFriend(targetFriend); // Arkadaşı seç
                 }
+            } 
+        }
+        
+        // SENARYO 2: URL sadece "/" ise (Dashboard)
+        else if (path === '/') {
+            if (selectedFriend || activeServerId) {
+                setActiveServer(null);
+                setSelectedFriend(null);
             }
         }
 
-        // 5. Kanal hala mevcutsa bağlan
-        if (foundChannel) {
-            console.log(`🔄 Otomatik bağlanılıyor: ${foundChannel.name}`);
-            setActiveVoiceChannel(foundChannel);
-        } else {
-            // Kanal silinmişse veya artık erişim yoksa hafızayı temizle
-            sessionStorage.removeItem('lastVoiceChannelId');
+    }, [location.pathname, friends]); // URL veya Liste değişince çalışır
+
+// 🔄 F5 SONRASI OTOMATİK BAĞLANMA (GÜNCELLENMİŞ)
+useEffect(() => {
+    // 1. Hafızadaki veriyi JSON olarak oku
+    const savedSessionStr = sessionStorage.getItem('activeVoiceSession');
+
+    if (savedSessionStr && !activeVoiceChannel) {
+        try {
+            const savedChannel = JSON.parse(savedSessionStr);
+
+            // === SENARYO A: DM ARAMASIYSA ===
+            // Sunucu listesinin yüklenmesini beklemeye gerek yok, direkt bağlan.
+            if (savedChannel.type === 'dm') {
+                console.log(`🔄 DM'ye tekrar bağlanılıyor: ${savedChannel.name}`);
+                setActiveVoiceChannel(savedChannel);
+            } 
+            
+            // === SENARYO B: SUNUCU KANALIYSA ===
+            // Senin mevcut güvenlik kontrolünü (MyServers) burada yapıyoruz
+            else {
+                // Sunucular yüklenmediyse bekle
+                if (!myServers || myServers.length === 0) return;
+
+                let foundChannel = null;
+                // Senin yazdığın döngü mantığı aynen kalıyor
+                for (const server of myServers) {
+                    if (server.channels) {
+                        const channel = server.channels.find(c => c._id === savedChannel._id);
+                        if (channel) {
+                            foundChannel = { ...channel, type: 'server' }; // Type eklemeyi unutma
+                            break;
+                        }
+                    }
+                }
+
+                if (foundChannel) {
+                    console.log(`🔄 Sunucu kanalına tekrar bağlanılıyor: ${foundChannel.name}`);
+                    setActiveVoiceChannel(foundChannel);
+                } else {
+                    // Kanal artık yoksa veya yetki gittiyse temizle
+                    sessionStorage.removeItem('activeVoiceSession');
+                }
+            }
+
+        } catch (e) {
+            console.error("Session parse hatası:", e);
+            sessionStorage.removeItem('activeVoiceSession');
         }
     }
-}, [myServers]); // 👈 myServers değiştiğinde (yüklendiğinde) çalışır
+}, [myServers]); // myServers değişince tekrar dener (Sadece sunucular için önemlidir)
 
 useEffect(() => {
    if(activeServer != null){
@@ -596,7 +722,7 @@ const handleRegister = async (username, password, nickname) => {
   const handleManualDisconnect = () => {
     console.log("👋 Kullanıcı kendi isteğiyle ayrıldı.");
     // Önce hafızadan sil, sonra state'i temizle
-    sessionStorage.removeItem('lastVoiceChannelId');
+    sessionStorage.removeItem('activeVoiceSession');
     handleLeaveVoice();
   };
 
@@ -615,12 +741,12 @@ const handleJoinVoice = (channel) => {
         setTimeout(() => {
             setActiveVoiceChannel(channel);
             // 👇 YENİ: Hafızaya kaydet
-            sessionStorage.setItem('lastVoiceChannelId', channel._id);
+            sessionStorage.setItem('activeVoiceSession', JSON.stringify(channel));
         }, 150);
     } else {
         setActiveVoiceChannel(channel);
         // 👇 YENİ: Hafızaya kaydet
-        sessionStorage.setItem('lastVoiceChannelId', channel._id);
+        sessionStorage.setItem('activeVoiceSession', JSON.stringify(channel));
     }
     socket.emit('join-voice-channel', {
         channelId: channel._id,
@@ -856,13 +982,23 @@ const userPanelContent = (
     />
 );
 
-const voicePanelContent = activeVoiceChannel ? (
+// 1. KONTROL: Şu an aktif konuştuğumuz kişinin sayfasında mıyız?
+// ID'leri String'e çevirerek karşılaştırıyoruz ki hata olmasın.
+const isViewingActiveDm = 
+    activeVoiceChannel?.type === 'dm' && 
+    !activeServer && 
+    String(selectedFriend?._id) === String(activeVoiceChannel.friendId);
+
+// 2. PANEL İÇERİĞİ
+const voicePanelContent = (activeVoiceChannel && !isViewingActiveDm) ? (
     <VoiceConnectionPanel 
+        // Kanal İsmi (Arkadaşın Adı)
         channelName={activeVoiceChannel.name}
+        
+        // Sunucu İsmi (DM ise "Direkt Görüşme", değilse Sunucu Adı)
+        serverName={activeVoiceChannel.type === 'dm' ? "Direkt Görüşme" : "Sunucu Kanalı"}
+        
         onDisconnect={handleManualDisconnect}
-        // DİKKAT: activeServer her zaman dolu olmayabilir (Ana sayfadaysak null'dır).
-        // Bu yüzden helper fonksiyonu kullanıyoruz:
-        serverName={getVoiceConnectionDetails().serverName}
     />
 ) : null;
 
@@ -1002,6 +1138,15 @@ const voicePanelContent = activeVoiceChannel ? (
                 messages={messages}
                 fetchMessages={fetchMessages}
                 handleSendMessage={handleSendMessage}
+                selectedFriend={selectedFriend}
+                setSelectedFriend={setSelectedFriend}
+                onStartDmCall={handleStartDmCall} 
+                onEndCall={handleManualDisconnect}
+                activeVoiceChannel={activeVoiceChannel}
+                isMicMuted={isMicMuted}
+                toggleMic={toggleMic}       // Fonksiyonu direkt veriyoruz
+                isDeafened={isDeafened}
+                toggleDeafen={toggleDeafen}
             />
         )}
       </div>
