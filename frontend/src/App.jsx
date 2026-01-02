@@ -50,6 +50,7 @@ function App() {
   // UI States
   const [activeServer, setActiveServer] = useState(null); 
   const [activeChannel, setActiveChannel] = useState(null);
+  const [activeVoiceUsers, setActiveVoiceUsers] = useState({}); // { kanalId: [user1, user2] }
   const [activeTab, setActiveTab] = useState('online'); 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -96,6 +97,17 @@ const closeFeedback = () => {
   const openCreateModal = (type) => { 
       setCreateModal({ isOpen: true, type }); 
   };
+
+  useEffect(() => {
+    // Sunucudan gelen ses durumu güncellemesini dinle
+    socket.on('voice-state-update', (currentVoiceState) => {
+        setActiveVoiceUsers(currentVoiceState);
+    });
+
+    return () => {
+        socket.off('voice-state-update');
+    };
+}, []);
   
   // --- AKILLI YÖNLENDİRME (ROUTING) ---
   useEffect(() => {
@@ -352,6 +364,22 @@ useEffect(() => {
     }
   }, [token, location.pathname]);
 
+useEffect(() => {
+    // 1. Dinleyiciyi tanımla
+    const handleVoiceUpdate = (data) => {
+        console.log("Ses odaları güncellendi:", data); // Debug için log
+        setAllVoiceStates(data);
+    };
+
+    // 2. Event'e abone ol
+    socket.on('voice-state-update', handleVoiceUpdate);
+
+    // 3. Cleanup (Temizlik)
+    return () => {
+        socket.off('voice-state-update', handleVoiceUpdate);
+    };
+}, []);
+
   const fetchUserData = async () => {
     try {
       const storedUser = JSON.parse(localStorage.getItem('user'));
@@ -549,6 +577,7 @@ const handleRegister = async (username, password, nickname) => {
   const handleLeaveVoice = () => {
         setActiveVoiceChannel(null);
         setVoiceParticipants([]);
+        socket.emit('leave-voice-channel', currentUser._id);
     };
 
   const handleManualDisconnect = () => {
@@ -580,6 +609,15 @@ const handleJoinVoice = (channel) => {
         // 👇 YENİ: Hafızaya kaydet
         sessionStorage.setItem('lastVoiceChannelId', channel._id);
     }
+    socket.emit('join-voice-channel', {
+        channelId: channel._id,
+        user: {
+            _id: currentUser._id,
+            username: currentUser.username,
+            nickname: currentUser.nickname,
+            avatar: currentUser.avatar
+        }
+    });
 };
 
   // --- DİĞER HANDLERS ---
@@ -891,7 +929,7 @@ const voicePanelContent = activeVoiceChannel ? (
                         onJoinVoice={handleJoinVoice}
                         activeVoiceChannel={activeVoiceChannel} 
                         onLeaveVoice={handleManualDisconnect}
-                        allVoiceStates={allVoiceStates}
+                        allVoiceStates={activeVoiceUsers}
                         
                         
                         

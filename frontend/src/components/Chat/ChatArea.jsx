@@ -255,7 +255,7 @@ const ChatArea = ({
                                 {!shouldGroup ? (
                                     <div className="w-10 h-10 rounded-full bg-gray-600 overflow-hidden active:translate-y-0.5 transition-transform mt-0.5">
                                         <AnimatedAvatar 
-                                            src={msg.sender?.avatar || "https://i.pravatar.cc/150"} 
+                                            src={msg.sender?.avatar} 
                                             alt={msg.senderNickname}
                                             className="w-full h-full object-cover"
                                         />
@@ -293,7 +293,7 @@ const ChatArea = ({
                                     <div className="mb-2">
                                         {/* RESİM */}
                                         {msg.attachmentType === 'image' && (
-                                            <div className="max-w-[500px] max-h-[300px] overflow-hidden rounded-lg cursor-pointer mt-2">
+                                            <div className="max-w-[500px] max-h-[500px] overflow-hidden rounded-lg cursor-pointer mt-2">
                                                 <img 
                                                     src={msg.attachmentUrl} 
                                                     className="max-w-full max-h-full object-contain rounded-lg hover:scale-[1.01] transition"

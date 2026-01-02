@@ -125,22 +125,55 @@ const ChannelList = ({
                 />
             </div>
             
+            {/* --- SES KANALLARI LOOP --- */}
             {!isVoiceCollapsed && voiceChannels.map(channel => {
+                // 1. Aktif kanalda mıyız?
                 const isActive = activeVoiceChannel?._id === channel._id;
-                
-                // Bot Kontrolü (Güvenli Erişim)
+
+                // 2. Bot bu kanalda mı?
                 const isBotInThisChannel = activeBot && 
                     activeBot.currentVoiceChannel === channel._id &&
                     activeBot.serverId === serverId;
+
+                // 3. KATILIMCI LİSTESİNİ BELİRLE (KRİTİK KISIM) 🛠️
+                let participantsToDisplay = [];
+
+                if (isActive) {
+                    // Durum A: Kanalın içindeyiz -> LiveKit verisini kullan (Anlık konuşma, mute bilgisi var)
+                    participantsToDisplay = voiceParticipants || [];
+                } else {
+                    // Durum B: Dışarıdan bakıyoruz -> Socket verisini kullan (Global liste)
+                    // allVoiceStates: { "kanalId": [ { _id, username, avatar... } ] }
+                    participantsToDisplay = allVoiceStates?.[channel._id] || [];
+                }
+
+                // Botu listeye manuel ekle (Eğer socket listesinde yoksa ve bot oradaysa)
+                // Bu, botun görünmez olmasını engeller.
+                if (isBotInThisChannel) {
+                    // Botun zaten listede olup olmadığına bak (ID çakışmasını önle)
+                    const isBotListed = participantsToDisplay.some(p => (p.user?._id || p._id) === activeBot._id);
+                    
+                    if (!isBotListed) {
+                        participantsToDisplay = [
+                            ...participantsToDisplay, 
+                            { 
+                                user: { 
+                                    _id: activeBot._id, 
+                                    username: "Music Bot", 
+                                    avatar: activeBot.avatar, // Bot avatarı
+                                    isBot: true 
+                                },
+                                isSpeaking: true // Bot genelde konuşuyordur :)
+                            }
+                        ];
+                    }
+                }
+
+                // Listede kimse var mı?
+                const hasParticipants = participantsToDisplay.length > 0;
                 
-                // Listelenecek Katılımcılar
-                // NOT: LiveKit geçişiyle birlikte 'voiceParticipants' boş gelebilir. 
-                // İleride LiveKit bileşeninden katılımcı listesini çekmek gerekebilir.
-                const participantsToDisplay = isActive 
-                    ? (voiceParticipants || []) 
-                    : (allVoiceStates?.[channel._id] || []);
-                
-                const shouldExpand = isActive || participantsToDisplay.length > 0 || isBotInThisChannel;
+                // Genişletme mantığı: Aktifsek VEYA içeride biri varsa VEYA bot varsa aç.
+                const shouldExpand = isActive || hasParticipants;
 
                 return (
                     <div key={channel._id}>
@@ -158,47 +191,69 @@ const ChannelList = ({
                         {/* KATILIMCILAR LİSTESİ */}
                         {shouldExpand && (
                             <div className="pl-8 pb-2 flex flex-col gap-1">
-
-                                {/* KULLANICILAR */}
                                 {participantsToDisplay.map((p, idx) => {
+                                    // VERİ YAPISINI EŞİTLEME 🔄
+                                    // Socket'ten gelen veri direk 'user' objesidir ({_id, username...})
+                                    // LiveKit'ten gelen veri 'p.user' içindedir.
                                     const user = p.user || p; 
-                                    // LiveKit'ten gelen verileri al, yoksa false kabul et color: #1a1a1eff
-                                    const isMuted = p.isMuted || false;
-                                    const isDeafened = p.isDeafened || false;
+
+                                    if (user.avatar && user.avatar.includes('http')) {
+        console.log("🔍 Şüpheli Avatar URL'si:", user.avatar);
+    }
+                                    
+                                    // Socket verisinde isMuted/isSpeaking bilgisi olmaz, varsayılan false yapıyoruz.
+                                    // Sadece kendi kanalımızdaysak (isActive) bu bilgiler doğrudur.
+                                    const isMuted = isActive ? (p.isMuted || false) : false;
+                                    const isDeafened = isActive ? (p.isDeafened || false) : false;
+                                    const isSpeaking = isActive ? (p.isSpeaking || false) : false;
 
                                     return (
-                                        <div key={user._id || idx} className="flex items-center justify-between px-2 py-1 rounded cursor-pointer group/user">
+                                        <div key={user._id || idx} className="flex items-center justify-between px-2 py-1 rounded cursor-pointer group/user hover:bg-white/5">
                                             
                                             {/* Sol Kısım: Avatar ve İsim */}
                                             <div className="flex items-center gap-2 p-0.5 overflow-hidden">
-                                                <div className={`relative w-9 h-9 rounded-full ${p.isSpeaking ? 'ring-2 ring-green-500' : ''}`}>
-                                                    <img 
-                                                        src={user.avatar || "https://i.pravatar.cc/150"} 
-                                                        className={`w-full h-full rounded-full object-cover ${isDeafened ? 'opacity-50' : 'opacity-100'}`}
-                                                        alt={user.username}
-                                                    />
+                                                {/* Avatar Kısmı */}
+                                                <div className={`relative w-8 h-8 rounded-full ${isSpeaking ? 'ring-2 ring-green-500' : ''} bg-[#313338] flex items-center justify-center`}>
+                                                    
+                                                    {/* Eğer avatar varsa göster */}
+                                                    {user.avatar ? (
+                                                        <img 
+                                                            src={user.avatar} 
+                                                            className={`w-full h-full rounded-full object-cover ${isDeafened ? 'opacity-50' : 'opacity-100'}`}
+                                                            alt={user.username}
+                                                            // Resim yüklenirken hata olursa (404 vb.) varsayılanı göster
+                                                            onError={(e) => {
+                                                                e.target.style.display = 'none'; // Resmi gizle
+                                                                e.target.parentElement.classList.add('fallback-avatar'); // Arkadaki rengi göster
+                                                            }}
+                                                        />
+                                                    ) : (
+                                                        /* Avatar yoksa Discord Logosu veya Baş harf göster */
+                                                        <div className={`w-full h-full rounded-full flex items-center justify-center bg-indigo-500 text-white text-xs font-bold ${isDeafened ? 'opacity-50' : ''}`}>
+                                                            {user.username?.charAt(0).toUpperCase()}
+                                                        </div>
+                                                    )}
+                                                    
+                                                    {/* Online indicator vb... */}
                                                 </div>
-                                                <span className={`text-[17px] truncate ${isDeafened ? 'text-gray-400' : 'text-gray-200'}`}>
+                                                <span className={`text-[14px] truncate ${isDeafened ? 'text-gray-400' : 'text-gray-300'}`}>
                                                     {user.nickname || user.username}
                                                 </span>
                                             </div>
 
-                                            {/* Sağ Kısım: Durum İkonları */}
-                                            <div className="flex items-center gap-1">
-                                                {/* Mikrofon Kapalı İkonu */}
-                                                {isDeafened ? (
-                                                    <>
-                                                        <FaMicrophoneSlash size={17} className="text-red-500" title="Susturuldu (Otomatik)" />
-                                                        <TbHeadphonesOff size={18} className="text-red-500" title="Sağırlaştırıldı" />
-                                                    </>
-                                                ) : (
-                                                    /* Durum 2: SADECE SUSTURULMUŞ (MUTE) */
-                                                    isMuted && (
-                                                        <FaMicrophoneSlash size={17} className="text-red-500" title="Susturuldu" />
-                                                    )
-                                                )}
-                                            </div>
-
+                                            {/* Sağ Kısım: Durum İkonları (Sadece Aktif Kanalda Görünür) */}
+                                            {isActive && (
+                                                <div className="flex items-center gap-1">
+                                                    {isDeafened ? (
+                                                        <>
+                                                            <FaMicrophoneSlash size={14} className="text-red-500" />
+                                                            <TbHeadphonesOff size={14} className="text-red-500" />
+                                                        </>
+                                                    ) : (
+                                                        isMuted && <FaMicrophoneSlash size={14} className="text-red-500" />
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     )
                                 })}

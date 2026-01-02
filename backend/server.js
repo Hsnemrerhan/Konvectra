@@ -255,7 +255,7 @@ async function uploadToB2(file, folderPath) {
 async function deleteFromB2(fileUrl) {
     if (!fileUrl) return;
     
-    // Sadece bizim bucket'taki dosyaları silmeye çalışalım (pravatar.cc vs. silinmez)
+    // Sadece bizim bucket'taki dosyaları silmeye çalışalım
     if (!fileUrl.includes("backblazeb2.com") || !fileUrl.includes(BUCKET_NAME)) return;
 
     try {
@@ -1237,10 +1237,15 @@ io.on('connection', (socket) => {
 const userSocketMap = new Map();
 const userDisconnectTimers = new Map();
 
+// Global Ses Durumu (Hafızada tutulacak)
+// Yapı: { "kanalId": [ { id: "user1", name: "Emre", avatar: "..." } ] }
+let voiceChannels = {};
+
 io.on('connection', async (socket) => {
   console.log(`🔌 Yeni Bağlantı: ${socket.id}`);
 
   socket.emit('voice_state_update', globalVoiceState);
+  socket.emit('voice-state-update', voiceChannels);
 
   // 1. KULLANICI GİRİŞİ (Status Takibi İçin)
   socket.on('register_socket', async (userId) => {
@@ -1346,9 +1351,34 @@ io.on('connection', async (socket) => {
       socket.join(roomId);
   });
 
+  // 4. Kullanıcı Ses Kanalına Girdiğinde
+    socket.on('join-voice-channel', ({ channelId, user }) => {
+      // Önce kullanıcının eski kanallardan silindiğine emin ol (Kanal değiştiriyorsa)
+      removeUserFromVoice(user._id);
+
+      if (!voiceChannels[channelId]) {
+          voiceChannels[channelId] = [];
+      }
+
+      // Kullanıcıyı yeni kanala ekle
+      voiceChannels[channelId].push({
+          socketId: socket.id, // Çıkış yaparsa bulmak için
+          ...user
+      });
+
+      // TÜM KULLANICILARA GÜNCEL LİSTEYİ GÖNDER
+      io.emit('voice-state-update', voiceChannels);
+  });
+
+  // 5. Kullanıcı Ses Kanalından Çıktığında (Butonla)
+  socket.on('leave-voice-channel', (userId) => {
+      removeUserFromVoice(userId);
+      io.emit('voice-state-update', voiceChannels);
+  });
+
   // ----------------------------------------------------------------------
   // 🗑️ SİLİNEN KISIMLAR:
-  // join_voice_room, leave_voice_room, sending_signal, returning_signal
+  // sending_signal, returning_signal
   // speaking_status, music_ended, voiceSessions...
   //
   // ARTIK GEREK YOK! LiveKit bunların hepsini kendi sunucusunda yönetiyor.
@@ -1357,35 +1387,83 @@ io.on('connection', async (socket) => {
 
   // --- BAĞLANTI KOPTUĞUNDA ---
   socket.on('disconnect', async () => {
-    // Sadece Online/Offline takibi yapıyoruz. Ses odası temizliğine gerek kalmadı.
-    if (socket.userId) {
-        const userId = socket.userId;
-        const userSockets = userSocketMap.get(userId);
+        
+      // -----------------------------------------------------
+      // 1. SES KANALI TEMİZLİĞİ (ANINDA ÇALIŞIR)
+      // -----------------------------------------------------
+      // Kullanıcı sayfayı kapattığı an ses kanalından düşmelidir.
+      // Bekleme (timeout) yapmıyoruz.
+      
+      let voiceStateChanged = false;
 
-        if (userSockets) {
-            userSockets.delete(socket.id);
-            if (userSockets.size === 0) {
-                if (userDisconnectTimers.has(userId)) clearTimeout(userDisconnectTimers.get(userId));
-                const timer = setTimeout(async () => {
-                    const currentSockets = userSocketMap.get(userId);
-                    if (!currentSockets || currentSockets.size === 0) {
-                        userSocketMap.delete(userId);
-                        userDisconnectTimers.delete(userId);
-                        await setUserStatus(userId, 'offline');
-                        const user = await User.findById(userId).lean();
-                        if (user) {
-                            delete user.password;
-                            user.status = 'offline';
-                            io.emit('user_updated', user);
-                        }
-                    }
-                }, 2000); 
-                userDisconnectTimers.set(userId, timer);
-            }
+      // Tüm kanalları gez, bu socket.id'ye sahip kullanıcı var mı bak
+      for (const [channelId, users] of Object.entries(voiceChannels)) {
+          const index = users.findIndex(u => u.socketId === socket.id);
+          
+          if (index !== -1) {
+              // Kullanıcıyı kanaldan sil
+              users.splice(index, 1);
+              
+              // Eğer kanal boşaldıysa kanalı da listeden sil (hafıza temizliği)
+              if (users.length === 0) {
+                  delete voiceChannels[channelId];
+              }
+              
+              voiceStateChanged = true;
+          }
+      }
+
+      // Eğer bir değişiklik olduysa herkese yeni listeyi gönder
+      if (voiceStateChanged) {
+          io.emit('voice-state-update', voiceChannels);
+      }
+
+
+      // -----------------------------------------------------
+      // 2. ONLINE/OFFLINE DURUMU (GECİKMELİ ÇALIŞIR)
+      // -----------------------------------------------------
+      // Senin mevcut kodun aynen burada kalıyor
+      if (socket.userId) {
+          const userId = socket.userId;
+          const userSockets = userSocketMap.get(userId);
+
+          if (userSockets) {
+              userSockets.delete(socket.id);
+              if (userSockets.size === 0) {
+                  if (userDisconnectTimers.has(userId)) clearTimeout(userDisconnectTimers.get(userId));
+                  
+                  const timer = setTimeout(async () => {
+                      const currentSockets = userSocketMap.get(userId);
+                      if (!currentSockets || currentSockets.size === 0) {
+                          userSocketMap.delete(userId);
+                          userDisconnectTimers.delete(userId);
+                          
+                          // DB işlemleri
+                          await setUserStatus(userId, 'offline');
+                          const user = await User.findById(userId).lean();
+                          if (user) {
+                              delete user.password;
+                              user.status = 'offline';
+                              io.emit('user_updated', user);
+                          }
+                      }
+                  }, 2000); 
+                  userDisconnectTimers.set(userId, timer);
+              }
+          }
+      }
+    });
+});
+
+// Yardımcı Fonksiyon: Kullanıcıyı tüm kanallardan temizle
+function removeUserFromVoice(userId) {
+    for (const channelId in voiceChannels) {
+        voiceChannels[channelId] = voiceChannels[channelId].filter(u => u._id !== userId);
+        if (voiceChannels[channelId].length === 0) {
+            delete voiceChannels[channelId];
         }
     }
-  });
-});
+}
 
 const PORT = process.env.PORT;
 server.listen(PORT, () => {
