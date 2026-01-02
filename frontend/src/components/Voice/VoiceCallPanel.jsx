@@ -1,4 +1,5 @@
 import React from 'react';
+import { useState, useEffect } from 'react';
 import { FaMicrophone, FaMicrophoneSlash, FaPhoneSlash } from 'react-icons/fa';
 import { TbHeadphones, TbHeadphonesOff } from "react-icons/tb";
 import AnimatedNickname from '../Chat/AnimatedNickname';
@@ -12,6 +13,50 @@ const VoiceCallPanel = ({
     toggleDeafen,
     connectionStatus // 'connecting', 'connected', 'disconnected'
 }) => {
+
+  // Süre sayacı için state
+    const [duration, setDuration] = useState(0);
+
+    // Sadece "Connected" olduğunda süreyi başlat
+    useEffect(() => {
+        let interval;
+        if (connectionStatus === 'connected') {
+            interval = setInterval(() => {
+                setDuration(prev => prev + 1);
+            }, 1000);
+        } else {
+            setDuration(0); // Bağlantı koparsa süreyi sıfırla (veya durdur)
+        }
+        return () => clearInterval(interval);
+    }, [connectionStatus]);
+
+    // Saniyeyi Dakika:Saniye formatına çevir (05:30 gibi)
+    const formatTime = (seconds) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    };
+
+    // Duruma göre Başlık ve Alt Metin belirle
+    let statusTitle = "";
+    let statusColor = "";
+
+    switch (connectionStatus) {
+        case 'connected':
+            statusTitle = "Sesli Görüşme Bağlandı";
+            statusColor = "text-green-400";
+            break;
+        case 'waiting':
+            statusTitle = `${friend?.nickname || friend?.username} Bekleniyor...`;
+            statusColor = "text-yellow-400"; // Beklerken sarı
+            break;
+        case 'connecting':
+        default:
+            statusTitle = "Bağlanılıyor...";
+            statusColor = "text-gray-400";
+            break;
+    }
+    
   return (
     <div className="bg-[#121214] border-b border-[#1e1f22] p-8 flex flex-col items-center justify-center relative overflow-hidden shadow-lg animate-slide-down transition-all duration-300">
       
@@ -38,9 +83,9 @@ const VoiceCallPanel = ({
               text={friend.nickname} 
               className="text-white font-bold text-lg"
           />
-          <span className="text-xs font-medium text-[#5865F2] tracking-wider uppercase animate-pulse">
-              {connectionStatus === 'connected' ? 'Sesli Bağlantı Aktif' : 'Bağlanıyor...'}
-          </span>
+          <p className={`text-sm font-medium tracking-wide mb-8 z-10 ${statusColor}`}>
+                {connectionStatus === 'connected' ? formatTime(duration) : statusTitle}
+            </p>
       </div>
 
       {/* Kontrol Butonları */}

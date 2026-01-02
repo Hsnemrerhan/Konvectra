@@ -955,21 +955,6 @@ const toggleDeafen = () => {
     // Not: Sağırlaştırma kapanınca mikrofon kapalı kalsın (Discord mantığı)
 };
 
-// App.jsx içi
-
-// 🔍 Ses kanalının hangi sunucuda olduğunu bulan yardımcı fonksiyon
-const getVoiceConnectionDetails = () => {
-    if (!activeVoiceChannel || !myServers) return { serverName: "Bilinmeyen Sunucu" };
-
-    // Tüm sunucuları tara, kanalı içeren sunucuyu bul
-    const ownerServer = myServers.find(server => 
-        server.channels && server.channels.some(c => c._id === activeVoiceChannel._id)
-    );
-
-    return {
-        serverName: ownerServer ? ownerServer.name : "Sunucu Bulunamadı"
-    };
-};
 
 const userPanelContent = (
     <UserProfile 
@@ -1147,6 +1132,10 @@ const voicePanelContent = (activeVoiceChannel && !isViewingActiveDm) ? (
                 toggleMic={toggleMic}       // Fonksiyonu direkt veriyoruz
                 isDeafened={isDeafened}
                 toggleDeafen={toggleDeafen}
+                connectionStatus={
+                    !voiceParticipants ? 'connecting' : 
+                    voiceParticipants.length <= 1 ? 'waiting' : 'connected'
+                }
             />
         )}
       </div>

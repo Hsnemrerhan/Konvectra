@@ -18,6 +18,7 @@ const HomeView = ({
     fetchMessages,
     selectedFriend, 
     setSelectedFriend,
+    connectionStatus,
     userPanelContent,
     voicePanelContent, // App.jsx'ten Sidebar'a gitmesi için
     onStartDmCall, // App.jsx'ten gelen fonksiyon
@@ -163,7 +164,7 @@ useEffect(() => {
                                 toggleDeafen={toggleDeafen}
                                 // Eğer voiceParticipants undefined ise boş dizi gönder
                                 participants={voiceParticipants || []}
-                                connectionStatus={(voiceParticipants && voiceParticipants.length > 0) ? 'connected' : 'connecting'}
+                                connectionStatus={connectionStatus}
                             />
                             {/* VoiceRoom BURADAN SİLİNDİ (Artık App.jsx'te) */}
                         </div>
