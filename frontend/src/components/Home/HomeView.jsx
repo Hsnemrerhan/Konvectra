@@ -54,6 +54,17 @@ const HomeView = ({
   const startCall = () => {
         if (dmRoomId && selectedFriend) {
             onStartDmCall(selectedFriend, dmRoomId);
+            // 2. 👇 YENİ: Karşı tarafa sinyal gönder
+            socket.emit("call_user", {
+                toUserId: selectedFriend._id,
+                roomId: dmRoomId,
+                friendCode: currentUser.friendCode, // Karşı taraf bize dönebilsin diye
+                caller: {
+                    _id: currentUser.id,
+                    nickname: currentUser.nickname,
+                    avatar: currentUser.avatar
+                }
+            });
         } else {
             console.error("DM ID veya Arkadaş bulunamadı");
         }

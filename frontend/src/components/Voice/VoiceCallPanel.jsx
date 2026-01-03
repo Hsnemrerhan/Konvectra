@@ -50,6 +50,22 @@ const VoiceCallPanel = ({
             statusTitle = `${friend?.nickname || friend?.username} Bekleniyor...`;
             statusColor = "text-yellow-400"; // Beklerken sarı
             break;
+        case 'rejected':
+            statusTitle = "Arama Reddedildi";
+            statusColor = "text-red-500 font-bold"; // Kırmızı ve Kalın
+            break;
+        case 'missed':
+            statusTitle = "Cevap Verilmedi";
+            statusColor = "text-orange-500 font-bold";
+            break;
+        case 'busy':
+            statusTitle = "Kullanıcı Meşgul";
+            statusColor = "text-red-500";
+            break;
+        case 'ended':
+            statusTitle = "Arama Sonlandırıldı";
+            statusColor = "text-red-500 font-bold";
+            break;
         case 'connecting':
         default:
             statusTitle = "Bağlanılıyor...";

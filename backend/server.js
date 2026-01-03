@@ -1312,6 +1312,45 @@ io.on('connection', async (socket) => {
       }
   });
 
+  socket.on("call_user", (data) => {
+      // data: { toUserId, roomId, caller: { _id, nickname, avatar } }
+      
+      // Hedef kullanıcının socket ID'sini bul (Senin userMap yapına göre değişebilir)
+      // Örnek: const targetSocketId = userSocketMap[data.toUserId];
+      
+      // Sadece hedef kullanıcıya "Seni Arıyorlar" sinyali gönder
+      socket.to(data.toUserId).emit("incoming_call", {
+          caller: data.caller,
+          roomId: data.roomId,
+          friendCode: data.friendCode // Yönlendirme için gerekli
+      });
+  });
+
+  socket.on("reject_call", (data) => {
+      // data: { toUserId } (Arayan kişiye "Reddedildi" de)
+      socket.to(data.toUserId).emit("call_rejected", { 
+          message: "Kullanıcı aramayı reddetti." 
+      });
+  });
+
+  socket.on("call_timeout", (data) => {
+      // Cevapsız çağrı
+      socket.to(data.toUserId).emit("call_missed", { 
+          message: "Kullanıcı cevap vermedi." 
+      });
+  });
+
+  socket.on("cancel_call", (data) => {
+    // data: { toUserId }
+    socket.to(data.toUserId).emit("call_cancelled");
+});
+
+  socket.on("end_call", (data) => {
+      // data: { toUserId }
+      // Karşı tarafa "Görüşme diğer kişi tarafından bitirildi" de
+      socket.to(data.toUserId).emit("call_ended");
+  });
+
   // 2. CHAT MESAJLARI
   socket.on('chat_message', async (data) => {
       try {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { FaHashtag, FaVolumeUp, FaPlus, FaCog, FaAngleDown, FaMusic, FaMicrophoneSlash } from 'react-icons/fa';
@@ -18,6 +18,7 @@ import WelcomeModal from './components/Modals/WelcomeModal';
 import FeedbackModal from './components/Modals/FeedbackModal';
 import ServerSettingsModal from './components/Modals/ServerSettingsModal';
 import KickedModal from './components/Modals/KickedModal';
+import IncomingCallModal from './components/Modals/IncomingCallModal';
 import ServerWelcome from './components/Server/ServerWelcome';
 import CreateChannelModal from './components/Modals/CreateChannelModal';
 import HomeView from './components/Home/HomeView';
@@ -57,6 +58,8 @@ function App() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showServerSettings, setShowServerSettings] = useState(false);
   const [createModal, setCreateModal] = useState({ isOpen: false, type: 'text' });
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [callStatus, setCallStatus] = useState(null);
   
   // Data States
   const [myServers, setMyServers] = useState([]);
@@ -90,6 +93,10 @@ const [feedback, setFeedback] = useState({
     message: ''
 });
 
+// 🎵 SES REFERANSLARI (App.jsx içinde kalıcı olacak)
+const dialToneRef = useRef(null);
+const hangUpRef = useRef(null);
+
 // Modal Kapatma Yardımcısı
 const closeFeedback = () => {
     setFeedback(prev => ({ ...prev, isOpen: false }));
@@ -118,17 +125,68 @@ const handleStartDmCall = (friend, roomId) => {
     setVoiceParticipants([]);
 };
 
-// Aramayı Bitirme (Her yerden çağrılabilir)
-const handleEndCall = () => {
-    const channelId = activeVoiceChannel?.id;
-    setActiveVoiceChannel(null); // State'i temizle
-    setVoiceParticipants([]);
-    
-    // Eğer odaya bağlıysak socket'e çıkış bildir
-    if (channelId) {
-        socket.emit("leave_voice_room", channelId); 
-    }
-};
+// Ses dosyalarını bir kere yükle
+    useEffect(() => {
+        dialToneRef.current = new Audio('/sounds/calling.mp3');
+        dialToneRef.current.loop = true; // Döngü
+        dialToneRef.current.volume = 0.5;
+
+        hangUpRef.current = new Audio('/sounds/hangup.mp3');
+        hangUpRef.current.volume = 0.6;
+    }, []);
+
+// 🧮 ANLIK BAĞLANTI DURUMUNU HESAPLA
+    // Bu mantığı aşağıda hem ses için hem de View'a prop geçmek için kullanacağız
+    const connectionStatus = callStatus ? callStatus : 
+        (!voiceParticipants ? 'connecting' : 
+         voiceParticipants.length <= 1 ? 'waiting' : 'connected');
+
+// 🔊 GLOBAL SES YÖNETİMİ (Sayfa değişse de çalışır)
+    useEffect(() => {
+        const handleGlobalSound = async () => {
+            // Eğer aktif bir ses kanalı yoksa sesleri sustur (Garanti olsun)
+            if (!activeVoiceChannel) {
+                dialToneRef.current?.pause();
+                return;
+            }
+
+            // Sadece DM görüşmelerinde çalma sesi olur
+            if (activeVoiceChannel.type === 'dm') {
+                try {
+                    // A) ARIYORSAK (Waiting / Connecting)
+                    if (connectionStatus === 'waiting' || connectionStatus === 'connecting') {
+                        if (dialToneRef.current.paused) {
+                            await dialToneRef.current.play();
+                        }
+                    } 
+                    
+                    // B) BAĞLANDIYSAK (Connected)
+                    else if (connectionStatus === 'connected') {
+                        dialToneRef.current.pause();
+                        dialToneRef.current.currentTime = 0;
+                    }
+
+                    // C) REDDEDİLDİ / KAPANDI / CEVAP YOK
+                    else if (['rejected', 'missed', 'ended', 'busy'].includes(connectionStatus)) {
+                        // Çalıyor sesini durdur
+                        dialToneRef.current.pause();
+                        dialToneRef.current.currentTime = 0;
+
+                        // Kapanma sesini çal (Sadece 1 kere)
+                        // Çakışmayı önlemek için basit bir kontrol
+                        if (hangUpRef.current.paused) {
+                            await hangUpRef.current.play();
+                        }
+                    }
+                } catch (error) {
+                    console.warn("Ses oynatma hatası:", error);
+                }
+            }
+        };
+
+        handleGlobalSound();
+
+    }, [connectionStatus, activeVoiceChannel]);
 
   useEffect(() => {
     // Sunucudan gelen ses durumu güncellemesini dinle
@@ -385,6 +443,51 @@ useEffect(() => {
             setAllVoiceStates(data);
         });
 
+        // 📞 Biri seni aradığında
+        socket.on("incoming_call", (data) => {
+            console.log("📞 Arama Geliyor:", data.caller.nickname);
+            setIncomingCall(data);
+        });
+
+        // ❌ Arayan kişi vazgeçerse (Opsiyonel: Modal kapansın)
+        socket.on("call_cancelled", () => {
+            setIncomingCall(null);
+        });
+
+        // ❌ 1. KARŞI TARAF REDDEDERSE
+        socket.on("call_rejected", () => {
+            console.log("❌ Arama reddedildi.");
+            setCallStatus('rejected'); // Ekrana "Reddedildi" yazdıracağız
+
+            // 2 saniye mesajı göster, sonra kapat
+            setTimeout(() => {
+                handleManualDisconnect(); // Kapatma fonksiyonun
+                setCallStatus(null);      // State'i temizle
+            }, 3000);
+        });
+
+        // ⏳ 2. ZAMAN AŞIMI / CEVAP VERİLMEDİ
+        socket.on("call_missed", () => {
+            console.log("⏳ Cevap verilmedi.");
+            setCallStatus('missed'); // Ekrana "Cevap Verilmedi" yazdıracağız
+
+            setTimeout(() => {
+                handleManualDisconnect();
+                setCallStatus(null);
+            }, 3000);
+        });
+
+        socket.on("call_ended", () => {
+        console.log("🏁 Karşı taraf aramayı sonlandırdı.");
+        setCallStatus('ended'); // Ekrana "Sonlandırıldı" yazacağız
+
+        // 2 Saniye mesajı göster sonra at
+        setTimeout(() => {
+            handleManualDisconnect(); // Bizim tarafı da kapat
+            setCallStatus(null);
+        }, 3000);
+    });
+
       // 🗑️ TEMİZLENEN SOCKET EVENTLERİ: 
       // 'user_speaking_change', 'all_voice_states', 'voice_channel_state', 'music_command'
       // Bunlar artık LiveKit veya backend'in yeni yapısı tarafından yönetilecek.
@@ -400,10 +503,58 @@ useEffect(() => {
         socket.off('server_updated');
         socket.off('member_kicked');
         socket.off('voice_state_update');
+        socket.off("incoming_call");
+        socket.off("call_cancelled");
+        socket.off("call_rejected");
+        socket.off("call_missed");
+        socket.off("call_ended");
     };
   }, [token, currentUser.id]);
 
-  
+  // ⏳ ARAMA ZAMAN AŞIMI YÖNETİMİ
+    useEffect(() => {
+        let timer;
+        if (incomingCall) {
+            timer = setTimeout(() => {
+                // Süre doldu
+                console.log("⏳ Arama zaman aşımına uğradı.");
+                socket.emit("call_timeout", { toUserId: incomingCall.caller._id });
+                setIncomingCall(null); // Modalı kapat
+            }, 30000); // 30 Saniye
+        }
+        return () => clearTimeout(timer); // Kullanıcı cevap verirse sayacı iptal et
+    }, [incomingCall]);
+
+    // ✅ ARAMAYI KABUL ET
+    const handleAcceptCall = () => {
+        if (!incomingCall) return;
+
+        const { caller, roomId, friendCode } = incomingCall;
+
+        // 1. Modalı kapat
+        setIncomingCall(null);
+
+        // 2. Sayfayı yönlendir (Router yapına göre)
+        // Eğer zaten o sayfadaysan sorun yok, değilsen git
+        navigate(`/dm/${friendCode}`); 
+        
+        // 3. UI Ayarları (Arkadaşı seç, sunucudan çık)
+        const friend = friends.find(f => f._id === caller._id);
+        if (friend) setSelectedFriend(friend);
+        setActiveServer(null);
+
+        // 4. Ses kanalına bağlan (Mevcut mantığın)
+        handleStartDmCall(friend || caller, roomId); 
+    };
+
+    // ❌ ARAMAYI REDDET
+    const handleDeclineCall = () => {
+        if (!incomingCall) return;
+
+        // Arayana "Reddedildi" bilgisini gönder
+        socket.emit("reject_call", { toUserId: incomingCall.caller._id });
+        setIncomingCall(null);
+    };
 
   // 🔄 URL -> STATE EŞLEŞTİRMESİ (F5 atınca çalışır)
     useEffect(() => {
@@ -721,6 +872,23 @@ const handleRegister = async (username, password, nickname) => {
 
   const handleManualDisconnect = () => {
     console.log("👋 Kullanıcı kendi isteğiyle ayrıldı.");
+    
+    // Sadece DM ise kontrol et (Sunucu kanallarında herkes özgürce girip çıkabilir)
+    if (activeVoiceChannel?.type === 'dm' && activeVoiceChannel.friendId) {
+        
+        // SENARYO 1: Henüz kimse açmadıysa (İPTAL ET)
+        if (!voiceParticipants || voiceParticipants.length <= 1) {
+            
+            socket.emit("cancel_call", { toUserId: activeVoiceChannel.friendId });
+        } 
+        
+        // SENARYO 2: Zaten konuşuyorsak (GÖRÜŞMEYİ SONLANDIR) 🛑 YENİ KISIM
+        else {
+            console.log("ended");
+            
+            socket.emit("end_call", { toUserId: activeVoiceChannel.friendId });
+        }
+    }
     // Önce hafızadan sil, sonra state'i temizle
     sessionStorage.removeItem('activeVoiceSession');
     handleLeaveVoice();
@@ -1132,10 +1300,7 @@ const voicePanelContent = (activeVoiceChannel && !isViewingActiveDm) ? (
                 toggleMic={toggleMic}       // Fonksiyonu direkt veriyoruz
                 isDeafened={isDeafened}
                 toggleDeafen={toggleDeafen}
-                connectionStatus={
-                    !voiceParticipants ? 'connecting' : 
-                    voiceParticipants.length <= 1 ? 'waiting' : 'connected'
-                }
+                connectionStatus={connectionStatus}
             />
         )}
       </div>
@@ -1197,6 +1362,15 @@ const voicePanelContent = (activeVoiceChannel && !isViewingActiveDm) ? (
             title={feedback.title}
             message={feedback.message}
         />
+
+        {/* 👇 ARAMA MODALI */}
+        {incomingCall && (
+            <IncomingCallModal 
+                caller={incomingCall.caller}
+                onAccept={handleAcceptCall}
+                onDecline={handleDeclineCall}
+            />
+        )}
     </div>
   );
 }
